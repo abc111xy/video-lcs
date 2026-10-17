@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>隐私政策 · 流式频传输</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#141a24; --line:#232c3b; --text:#e6edf6; --muted:#8b98ab; --accent:#2f81f7; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif; line-height:1.85; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 40px 22px 80px; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 12px; margin-bottom: 28px; }
+  h2 { font-size: 16px; margin: 34px 0 10px; padding-left: 10px; border-left: 3px solid var(--accent); }
+  h3 { font-size: 14px; margin: 20px 0 6px; }
+  p, li { font-size: 14px; color: #cfd8e3; }
+  p { margin: 8px 0; }
+  ul { margin: 8px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  strong { color: #fff; }
+  table { width:100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  th, td { border: 1px solid var(--line); padding: 9px 10px; text-align: left; vertical-align: top; color:#cfd8e3; }
+  th { background: var(--panel); color: var(--muted); font-weight: 600; font-size: 12px; }
+  .warn { background: #1d2433; border: 1px solid #2b3a54; border-radius: 10px; padding: 14px 16px; margin: 16px 0; }
+  .warn p { color: #c7d6ee; margin: 4px 0; }
+  a { color: var(--accent); }
+  .back { display:inline-block; margin-bottom: 22px; color: var(--muted); font-size: 13px; text-decoration: none; }
+  footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/">← 返回首页</a>
+  <h1>隐私政策</h1>
+  <div class="meta">版本 v1.1 ｜ 生效日期：2026 年 10 月 17 日</div>
+
+  <div class="warn">
+    <p><strong>核心承诺：</strong>我们只收集提供账号服务所必需的最少信息；<strong>不存储、不录制、不回放您的任何直播画面与音频</strong>；不出售您的个人信息；不用于广告推送。</p>
+    <p><strong>请特别注意第 4 条：</strong>您的账号数据存储于<strong>境外服务器</strong>，完成注册即表示您对该跨境传输作出单独同意。</p>
+  </div>
+
+  <h2>一、我们是谁</h2>
+  <p>本政策适用于「流式频传输」（含网页端与 Android 客户端）。我们作为个人信息处理者，负责决定本政策所述信息的处理目的与方式。</p>
+
+  <h2>二、我们收集哪些信息</h2>
+  <p>我们遵循「最小必要」原则，仅收集下列信息：</p>
+  <table>
+    <tr><th style="width:26%">信息类型</th><th style="width:40%">具体内容</th><th>收集场景与目的</th></tr>
+    <tr>
+      <td>账号信息</td>
+      <td>电子邮箱、密码的<strong>不可逆哈希值</strong>（PBKDF2-SHA256，含随机盐）</td>
+      <td>注册、登录、身份识别。<strong>我们无法还原您的明文密码。</strong></td>
+    </tr>
+    <tr>
+      <td>个人资料</td>
+      <td>昵称、头像（您上传的图片会压缩后以 Base64 形式存储）、主题偏好</td>
+      <td>仅用于在您的账号下展示与个性化界面。<strong>头像可随时更换或清空，账号注销时一并删除。</strong></td>
+    </tr>
+    <tr>
+      <td>验证码记录</td>
+      <td>邮箱、验证码的哈希值、发送时间、尝试次数</td>
+      <td>邮箱有效性校验与防刷。验证成功后立即删除，最长保留 10 分钟。</td>
+    </tr>
+    <tr>
+      <td>登录与安全日志</td>
+      <td>IP 地址、浏览器/设备 User-Agent、登录时间、登录结果</td>
+      <td>账号安全、异常登录识别、依法配合调查。</td>
+    </tr>
+    <tr>
+      <td>开播记录</td>
+      <td>房间号、开播账号、开播时间、IP、是否为隐私模式</td>
+      <td>内容治理与可追溯性（这是提供屏幕共享服务的前提）。</td>
+    </tr>
+    <tr>
+      <td>协议同意记录</td>
+      <td>协议版本号、同意时间、同意时的 IP 与 User-Agent</td>
+      <td>证明我们已依法取得您的同意。</td>
+    </tr>
+  </table>
+
+  <p><strong>我们不会收集：</strong>您的通讯录、短信、相册、位置、设备唯一标识（IMEI/IDFA）、剪贴板内容；<strong>不会录制、存储或回放您直播的画面与声音</strong>。音视频数据仅在中继服务的内存中转发，转发完成即丢弃，不落盘。</p>
+
+  <h2>三、我们如何使用信息</h2>
+  <ul>
+    <li>创建与验证账号，完成登录与身份识别；</li>
+    <li>校验开播权限，确保每次直播可追溯到具体账号；</li>
+    <li>防范垃圾注册、暴力破解、异常登录等安全风险；</li>
+    <li>在接到举报或有权机关依法要求时，配合调查取证；</li>
+    <li>履行法律法规规定的义务（如网络安全日志留存）。</li>
+  </ul>
+  <p>我们<strong>不会</strong>将您的信息用于：广告投放、用户画像、自动化决策、向第三方出售或出租。</p>
+
+  <h2>四、信息存储位置与跨境传输（重要）</h2>
+  <p>4.1 <strong>为什么数据存放在境外：</strong>本服务部署在受限的运行环境中，该环境<strong>不提供可长期保留文件的本地存储</strong>——应用重启、重新部署或迁移后，写在本地磁盘上的数据会丢失，无法作为账号数据的存放位置。为保证您的账号、昵称、头像等资料能够<strong>持续保存而不丢失</strong>，我们只能使用独立的托管数据库。</p>
+  <p>4.2 基于上述原因，您的账号信息存储于 <strong>Neon 提供的 PostgreSQL 数据库</strong>，服务器位于<strong>新加坡（ap-southeast-1）</strong>。这是本服务当前可用的、具备持久化与备份能力的存储方案。</p>
+  <p>4.3 验证码邮件由本服务<strong>直接投递</strong>至您的邮箱服务商（解析收件域名的 MX 记录后投递），<strong>不经过第三方邮件平台中转</strong>；投递内容仅包含验证码与必要的说明文字。若后续启用第三方邮件服务，我们会在本政策更新后另行告知。</p>
+  <p>4.4 上述情形构成《中华人民共和国个人信息保护法》第三十九条所指的<strong>向境外提供个人信息</strong>。我们在注册页面以显著方式提示，并<strong>由您主动勾选同意</strong>后方可完成注册；您有权随时撤回该同意（撤回后我们将停止提供服务并删除账号）。</p>
+  <p>4.5 我们通过传输层加密（TLS）与数据库访问控制保护跨境传输过程，并要求境外服务商按其公开的隐私条款处理数据。您可随时撤回该同意，撤回后我们将停止提供服务并删除账号。</p>
+
+  <h2>五、我们如何共享信息</h2>
+  <p>除下列情形外，我们不会向任何第三方提供您的个人信息：</p>
+  <ul>
+    <li><strong>邮件服务商</strong>：为向您发送验证码，需向其提供您的邮箱地址；</li>
+    <li><strong>云服务商</strong>：数据库与计算资源由云服务商提供，属于受托处理；</li>
+    <li><strong>法律要求</strong>：依据法律法规、司法或行政机关的强制性要求，我们可能提供必要信息；</li>
+    <li><strong>权利保护</strong>：为保护我们、您或其他用户的合法权益所必需时。</li>
+  </ul>
+
+  <h2>六、保存期限</h2>
+  <ul>
+    <li>账号信息：至账号注销后 <strong>30 日</strong>内删除或匿名化；</li>
+    <li>验证码：验证成功即删除，未验证的最长保留 <strong>10 分钟</strong>；</li>
+    <li>登录日志与开播记录：自记录之日起 <strong>6 个月</strong>（符合网络安全相关法规的留存要求）；</li>
+    <li>协议同意记录：账号存续期间保留，作为合规凭证。</li>
+  </ul>
+
+  <h2>七、您的权利</h2>
+  <p>依据《个人信息保护法》，您对您的个人信息享有下列权利：</p>
+  <ul>
+    <li><strong>查阅、复制</strong>：了解我们持有哪些您的信息；</li>
+    <li><strong>更正、补充</strong>：要求更正不准确的信息；</li>
+    <li><strong>删除</strong>：在法定情形下要求删除；</li>
+    <li><strong>撤回同意</strong>：随时撤回对跨境传输等事项的同意；</li>
+    <li><strong>注销账号</strong>：停止使用并删除账号数据；</li>
+    <li><strong>解释说明</strong>：要求我们解释个人信息处理规则。</li>
+  </ul>
+  <p>请通过 <strong>support@spl.app.workbuddy.host</strong> 提出上述请求。我们将在核验您的身份后 <strong>15 个工作日</strong>内答复。</p>
+
+  <h2>八、我们如何保护信息</h2>
+  <ul>
+    <li>密码采用 PBKDF2-SHA256（21 万次迭代）+ 每用户随机盐，单向不可逆；</li>
+    <li>登录令牌为 32 字节随机数，服务端仅存储其哈希值，有效期 30 天；</li>
+    <li>数据库连接全程 TLS 加密，且仅允许应用服务器访问；</li>
+    <li>验证码 10 分钟失效、最多尝试 5 次、同邮箱 60 秒内不可重发；</li>
+    <li>对注册、登录、发送验证码实施频率限制，防范撞库与刷取。</li>
+  </ul>
+  <p>但请您理解：<strong>任何安全措施都无法保证绝对安全</strong>。若发生个人信息泄露事件，我们将依法及时告知您并向主管部门报告。</p>
+
+  <h2>九、未成年人保护</h2>
+  <p>本服务<strong>不面向未满 18 周岁的未成年人</strong>提供。我们不会主动收集未成年人的个人信息。若我们发现在未取得监护人同意的情况下收集了不满 14 周岁儿童的个人信息，将尽快删除。监护人如发现相关情况，可通过上述邮箱联系我们。</p>
+
+  <h2>十、Cookie 与本地存储</h2>
+  <p>网页端仅使用<strong>必要的本地存储</strong>（localStorage）保存登录令牌与房间号偏好，不使用第三方追踪 Cookie、不做跨站跟踪。您可随时清除浏览器数据，清除后需重新登录。</p>
+  <p>Android 客户端将登录令牌保存在应用私有存储区，不与其他应用共享；卸载应用即一并删除。</p>
+
+  <h2>十一、本政策的更新</h2>
+  <p>我们可能修订本政策。修订后将在本页面公布并更新版本号与生效日期；涉及处理目的、信息类型、跨境传输等实质性变更时，我们将通过站内提示或邮件通知，并在必要时重新征得您的同意。</p>
+
+  <h2>十二、联系我们</h2>
+  <p>个人信息保护相关咨询、投诉、权利行使：<strong>support@spl.app.workbuddy.host</strong></p>
+  <p>如您认为我们的处理行为损害了您的合法权益，也可向网信、市场监管等主管部门投诉举报。</p>
+
+  <footer>
+    本政策版本 v1.1，最后更新于 2026 年 10 月 17 日。<br />
+    本政策与《<a href="/terms.html">用户协议</a>》共同构成您与我们之间的完整约定。
+  </footer>
+</div>
+</body>
+</html>

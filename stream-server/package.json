@@ -1,0 +1,16 @@
+{
+  "name": "stream-relay-server",
+  "version": "1.0.0",
+  "description": "流式频传输平台 - 房间式中继后端（发送端推流 / 接收端与网页端拉流）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "pg": "^8.23.1",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

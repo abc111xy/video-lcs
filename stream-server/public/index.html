@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/theme.css" />
+<script>(function(){try{var t=localStorage.getItem('spl_theme');var d=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.setAttribute('data-theme',t==='light'?'light':t==='dark'?'dark':(d?'dark':'light'));}catch(e){}})();</script>
+
+<title>流式频传输平台 · 中继服务</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#141a24; --line:#232c3b; --text:#e6edf6; --muted:#8b98ab; --accent:#2f81f7; --ok:#2ea043; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif; padding:28px 20px 60px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .card { background: var(--panel); border:1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 600; letter-spacing:.5px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap: wrap; margin-bottom: 10px; }
+  input { font: inherit; font-size:14px; padding:9px 12px; border-radius:8px; border:1px solid var(--line); background:#0f141d; color:var(--text); outline:none; width: 140px; letter-spacing:2px; }
+  button, a.btn { font: inherit; font-size:14px; font-weight:600; padding:9px 14px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; text-decoration:none; display:inline-block; }
+  table { width:100%; border-collapse: collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); }
+  th { color: var(--muted); font-weight:500; font-size:12px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:99px; font-size:11px; border:1px solid var(--line); color:var(--muted); }
+  .pill.on { color: var(--ok); border-color: var(--ok); }
+  .pill.turbo { color: var(--accent); border-color: var(--accent); }
+  code { background:#0f141d; padding:2px 6px; border-radius:5px; font-size:12px; }
+  .empty { color: var(--muted); font-size:13px; padding: 10px 0; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .card.dl { border-color: rgba(47,129,247,.55); }
+  .card.dl .row { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="user-slot" id="userSlot" style="margin-bottom:16px"></div>
+  <h1>流式频传输平台 · 中继服务</h1>
+  <div class="sub">
+    手机 App 发送端推流 → 本中继服务 → 手机 App / 网页接收端拉流
+  </div>
+
+  <!-- 下载 -->
+  <div class="card dl">
+    <h2>下载 App</h2>
+    <div class="row">
+      <a class="btn" id="downloadApk" href="/download/StreamCast.apk" download="StreamCast.apk">下载 Android 版 APK</a>
+      <span class="meta" id="apkMeta">v2.1.0 · Android 8.0 及以上</span>
+    </div>
+    <div class="sub" style="margin:10px 0 0">
+      一个 App 既是发送端也是接收端：一台手机开播，另一台手机观看。服务地址已内置，装好即可用。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>网页接收端（无需第二台手机即可验证）</h2>
+    <div class="row">
+      <input id="room" placeholder="房间号" maxlength="12" />
+      <a class="btn" id="go" href="/watch.html">打开接收页面</a>
+    </div>
+    <div class="sub" style="margin:0">房间号与手机 App 上填写的一致即可开始观看。</div>
+  </div>
+
+  <div class="card">
+    <h2>当前房间</h2>
+    <table>
+      <thead><tr><th>房间号</th><th>房间名</th><th>状态</th><th>接收端</th><th>分辨率</th></tr></thead>
+      <tbody id="rooms"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>接入信息</h2>
+    <div class="sub" style="margin:0 0 8px">手机 App 中填写以下地址（含协议）：</div>
+    <div class="row"><code id="wsurl">-</code></div>
+  </div>
+
+  <div style="text-align:center;color:var(--muted);font-size:12px;margin-top:24px;line-height:2">
+    <a href="/terms.html" style="color:var(--muted)">《用户协议》</a>
+    ·
+    <a href="/privacy.html" style="color:var(--muted)">《隐私政策》</a>
+    <div>开播需登录账号，观看无需登录</div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+<script>
+  document.getElementById('wsurl').textContent = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+  const goBtn = document.getElementById('go');
+  goBtn.onclick = () => {
+    const r = document.getElementById('room').value.trim();
+    location.href = '/watch.html' + (r ? '?room=' + encodeURIComponent(r) : '');
+  };
+  async function refresh() {
+    try {
+      const res = await fetch('/api/rooms');
+      const data = await res.json();
+      const tbody = document.getElementById('rooms');
+      if (!data.rooms || !data.rooms.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">暂无房间，等待发送端接入…</td></tr>';
+      } else {
+        tbody.innerHTML = data.rooms.map(r =>
+          '<tr><td><b>' + r.room + '</b></td>' +
+          '<td>' + (r.title ? r.title : '<span style="color:var(--muted)">-</span>') + '</td>' +
+          '<td><span class="pill ' + (r.online ? 'on' : '') + '">' + (r.online ? '直播中' : '空闲') + '</span>' +
+          (r.turbo ? ' <span class="pill turbo">独享加速</span>' : '') + '</td>' +
+          '<td>' + r.receivers + '</td>' +
+          '<td>' + (r.meta && r.meta.width ? (r.meta.width + '×' + r.meta.height + ' @' + (r.meta.fps || '-') + 'fps') : '-') + '</td></tr>'
+        ).join('');
+      }
+    } catch (e) {}
+  }
+  refresh();
+  setInterval(refresh, 3000);
+
+  // 用户中心（登录态、头像、主题）
+  SC.mountUserCenter(document.getElementById('userSlot'));
+</script>
+</body>
+</html>

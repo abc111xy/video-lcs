@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 屏幕外框 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M32,30h44c2.2,0 4,1.8 4,4v40c0,2.2 -1.8,4 -4,4H32c-2.2,0 -4,-1.8 -4,-4V34C28,31.8 29.8,30 32,30zM34,36v36h40V36H34z" />
+    <!-- 传输信号 -->
+    <path
+        android:fillColor="#FF2F81F7"
+        android:pathData="M44,48h8v12h-8z" />
+    <path
+        android:fillColor="#FF2F81F7"
+        android:pathData="M56,44h8v20h-8z" />
+</vector>

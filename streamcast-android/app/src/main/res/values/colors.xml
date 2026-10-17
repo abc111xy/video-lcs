@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 亮色（默认）；暗色见 values-night/colors.xml -->
+    <color name="bg">#FFF6F8FB</color>
+    <color name="surface">#FFFFFFFF</color>
+    <color name="surface_alt">#FFEEF2F8</color>
+    <color name="line">#FFE3E8F0</color>
+    <color name="text">#FF101828</color>
+    <color name="muted">#FF667085</color>
+    <color name="accent">#FF2F6BF7</color>
+    <color name="ok">#FF15803D</color>
+    <color name="warn">#FFB45309</color>
+    <color name="err">#FFD92D20</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>登录 / 注册 · 流式频传输</title>
+<link rel="stylesheet" href="/theme.css" />
+<script>(function(){try{var t=localStorage.getItem('spl_theme');var d=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.setAttribute('data-theme',t==='light'?'light':t==='dark'?'dark':(d?'dark':'light'));}catch(e){}})();</script>
+
+<style>
+  :root { --bg:#0b0e14; --panel:#141a24; --line:#232c3b; --text:#e6edf6; --muted:#8b98ab; --accent:#2f81f7; --err:#f85149; --ok:#2ea043; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+         font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+         display:flex; align-items:center; justify-content:center; padding:24px; }
+  .card { width:100%; max-width: 400px; background: var(--panel); border:1px solid var(--line); border-radius: 16px; padding: 26px 22px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+  .tabs { display:flex; gap:8px; margin-bottom: 18px; }
+  .tab { flex:1; text-align:center; padding:9px; border-radius:9px; border:1px solid var(--line);
+         color: var(--muted); font-size:13px; cursor:pointer; user-select:none; }
+  .tab.on { background: var(--accent); border-color: var(--accent); color:#fff; font-weight:600; }
+  label { display:block; font-size:12px; color:var(--muted); margin: 12px 0 6px; }
+  input { width:100%; font:inherit; font-size:14px; padding: 11px 12px; border-radius: 9px;
+          border:1px solid var(--line); background:#0f141d; color:var(--text); outline:none; }
+  input:focus { border-color: var(--accent); }
+  .row { display:flex; gap:8px; }
+  .row input { flex:1; }
+  button { font:inherit; font-size:14px; font-weight:600; border-radius:9px; cursor:pointer;
+           border:1px solid var(--accent); background:var(--accent); color:#fff; padding: 11px 14px; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.ghost { background:transparent; border-color:var(--line); color:var(--text); font-weight:500; white-space:nowrap; }
+  #submit { width:100%; margin-top:18px; padding: 13px; }
+  .agree { display:flex; gap:8px; align-items:flex-start; margin-top:14px; font-size:12px; color:var(--muted); line-height:1.7; }
+  .agree input { width:auto; margin-top:3px; flex:none; }
+  .agree a { color: var(--accent); }
+  .msg { margin-top:14px; font-size:13px; min-height:20px; line-height:1.6; }
+  .hint { margin-top:6px; font-size:11.5px; color: var(--muted); line-height:1.6; }
+  .msg.err { color: var(--err); }
+  .msg.ok { color: var(--ok); }
+  .hidden { display:none !important; }
+  .foot { margin-top:18px; text-align:center; font-size:12px; color:var(--muted); }
+  .foot a { color: var(--muted); text-decoration:none; }
+  .banner { background:#2a1d1d; border:1px solid #5c2b2b; color:#f0c7c7; font-size:12px;
+            border-radius:9px; padding:10px 12px; margin-bottom:14px; line-height:1.6; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>流式频传输</h1>
+  <div class="sub">登录后可发起直播；观看无需登录</div>
+
+  <div class="banner hidden" id="mailBanner"></div>
+
+  <div class="tabs">
+    <div class="tab on" id="tabLogin" data-mode="login">登录</div>
+    <div class="tab" id="tabRegister" data-mode="register">注册</div>
+  </div>
+
+  <!-- 登录 -->
+  <div id="paneLogin">
+    <label>电子邮箱</label>
+    <input id="loginEmail" type="email" autocomplete="username" placeholder="you@example.com" />
+    <label>密码</label>
+    <input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入密码" />
+    <button id="loginBtn">登录</button>
+  </div>
+
+  <!-- 注册 -->
+  <div id="paneRegister" class="hidden">
+    <label>电子邮箱</label>
+    <input id="regEmail" type="email" autocomplete="email" placeholder="you@example.com" />
+    <label>邮箱验证码</label>
+    <div class="row">
+      <input id="regCode" inputmode="numeric" maxlength="6" placeholder="6 位数字" />
+      <button class="ghost" id="sendCodeBtn">获取验证码</button>
+    </div>
+    <div class="hint">验证码由系统直接投递到你的邮箱，通常 10 秒内到达；若未收到请检查「垃圾邮件 / 广告邮件」，发件人为 no-reply@spl.app.workbuddy.host。</div>
+    <label>设置密码</label>
+    <input id="regPassword" type="password" autocomplete="new-password" placeholder="8-64 位，含字母和数字" />
+    <label>确认密码</label>
+    <input id="regPassword2" type="password" autocomplete="new-password" placeholder="再次输入密码" />
+
+    <div class="agree">
+      <input type="checkbox" id="agree" />
+      <div>
+        我已阅读并同意<a href="/terms.html" target="_blank">《用户协议》</a>与<a href="/privacy.html" target="_blank">《隐私政策》</a>，
+        并知悉我的账号信息将存储于<strong>境外服务器</strong>，同意该跨境传输。
+      </div>
+    </div>
+    <button id="registerBtn">注册并登录</button>
+  </div>
+
+  <div class="msg" id="msg"></div>
+  <div class="foot"><a href="/">← 返回大厅</a></div>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const TOKEN_KEY = 'spl_token';
+  let mode = 'login';
+  let countdown = 0;
+  let timer = null;
+
+  function setMsg(text, kind) {
+    $('msg').textContent = text || '';
+    $('msg').className = 'msg' + (kind ? ' ' + kind : '');
+  }
+
+  function switchMode(next) {
+    mode = next;
+    $('tabLogin').classList.toggle('on', next === 'login');
+    $('tabRegister').classList.toggle('on', next === 'register');
+    $('paneLogin').classList.toggle('hidden', next !== 'login');
+    $('paneRegister').classList.toggle('hidden', next !== 'register');
+    setMsg('');
+  }
+
+  $('tabLogin').onclick = () => switchMode('login');
+  $('tabRegister').onclick = () => switchMode('register');
+
+  async function api(path, body) {
+    const res = await fetch(path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error(data.error || ('请求失败 (' + res.status + ')'));
+    return data;
+  }
+
+  // 检查邮件通道是否可用
+  api('/api/auth/config').then((cfg) => {
+    if (!cfg.mailConfigured) {
+      $('mailBanner').classList.remove('hidden');
+      $('mailBanner').textContent =
+        '注册暂不可用：服务端尚未配置邮件发送通道，无法投递验证码。请联系管理员。';
+      $('sendCodeBtn').disabled = true;
+      $('registerBtn').disabled = true;
+    }
+  }).catch(() => {});
+
+  $('sendCodeBtn').onclick = async () => {
+    const email = $('regEmail').value.trim();
+    if (!email) return setMsg('请先填写邮箱', 'err');
+    $('sendCodeBtn').disabled = true;
+    try {
+      await api('/api/auth/send-code', { email });
+      setMsg('验证码已发送，请查收邮件（含垃圾箱）', 'ok');
+      countdown = 60;
+      timer = setInterval(() => {
+        countdown -= 1;
+        if (countdown <= 0) {
+          clearInterval(timer);
+          $('sendCodeBtn').disabled = false;
+          $('sendCodeBtn').textContent = '重新获取';
+        } else {
+          $('sendCodeBtn').textContent = countdown + 's';
+        }
+      }, 1000);
+      $('sendCodeBtn').textContent = countdown + 's';
+    } catch (e) {
+      $('sendCodeBtn').disabled = false;
+      setMsg(e.message, 'err');
+    }
+  };
+
+  $('loginBtn').onclick = async () => {
+    const email = $('loginEmail').value.trim();
+    const password = $('loginPassword').value;
+    if (!email || !password) return setMsg('请填写邮箱和密码', 'err');
+    $('loginBtn').disabled = true;
+    try {
+      const r = await api('/api/auth/login', { email, password });
+      localStorage.setItem(TOKEN_KEY, r.token);
+      setMsg('登录成功，正在返回…', 'ok');
+      setTimeout(() => { location.href = '/'; }, 600);
+    } catch (e) {
+      setMsg(e.message, 'err');
+      $('loginBtn').disabled = false;
+    }
+  };
+
+  $('registerBtn').onclick = async () => {
+    const email = $('regEmail').value.trim();
+    const code = $('regCode').value.trim();
+    const password = $('regPassword').value;
+    const password2 = $('regPassword2').value;
+    if (!email) return setMsg('请填写邮箱', 'err');
+    if (!/^\d{6}$/.test(code)) return setMsg('请填写 6 位验证码', 'err');
+    if (password.length < 8) return setMsg('密码至少 8 位', 'err');
+    if (password !== password2) return setMsg('两次输入的密码不一致', 'err');
+    if (!$('agree').checked) return setMsg('请先阅读并同意《用户协议》与《隐私政策》', 'err');
+
+    $('registerBtn').disabled = true;
+    try {
+      const r = await api('/api/auth/register', {
+        email, password, code, agreeTerms: true,
+      });
+      localStorage.setItem(TOKEN_KEY, r.token);
+      setMsg('注册成功，正在返回…', 'ok');
+      setTimeout(() => { location.href = '/'; }, 700);
+    } catch (e) {
+      setMsg(e.message, 'err');
+      $('registerBtn').disabled = false;
+    }
+  };
+
+  // 已登录则直接回首页
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    fetch('/api/auth/me', { headers: { 'X-Auth-Token': token } })
+      .then((r) => { if (r.ok) location.href = '/'; })
+      .catch(() => {});
+  }
+})();
+</script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">流式频传输</string>
+    <string name="receiver_title">接收端</string>
+
+    <string name="sender_subtitle">屏幕直播 · 发送端</string>
+    <string name="label_server">中继服务地址</string>
+    <string name="label_room">房间号</string>
+    <string name="room_hint">4 位数字</string>
+    <string name="btn_overlay_perm">① 申请浮窗权限</string>
+    <string name="btn_notify_perm">② 申请通知权限</string>
+    <string name="btn_start">③ 开始屏幕直播</string>
+    <string name="btn_stop">停止直播</string>
+    <string name="btn_web">用浏览器观看</string>
+    <string name="btn_to_receiver">进入接收端</string>
+    <string name="label_fps">帧率</string>
+    <string name="label_quality">画质</string>
+    <string name="perm_granted">已授权</string>
+    <string name="perm_denied">未授权</string>
+</resources>
