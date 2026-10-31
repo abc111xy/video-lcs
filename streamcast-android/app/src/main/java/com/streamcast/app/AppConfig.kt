@@ -23,6 +23,10 @@ object AppConfig {
     const val KEY_AVATAR = "avatar"
     const val KEY_THEME = "theme"
 
+    /** 实验性功能：免责声明同意版本、远程控制总开关 */
+    const val KEY_EXP_ACK = "exp_ack"
+    const val KEY_REMOTE_CONTROL = "remote_control"
+
     const val DEFAULT_FPS = 8
     const val MAX_FPS = 60
     const val DEFAULT_QUALITY = 50
@@ -52,13 +56,24 @@ object AppConfig {
     const val FRAME_AUDIO: Byte = 0x02
     const val FRAME_VIDEO_H264: Byte = 0x03
     const val FRAME_CODEC_CONFIG: Byte = 0x04
+    /** 实验性：H.265 访问单元与参数集（VPS/SPS/PPS） */
+    const val FRAME_VIDEO_HEVC: Byte = 0x06
+    const val FRAME_CODEC_CONFIG_HEVC: Byte = 0x07
 
     /** 发送端丢弃积压后发出的「请跳到下一个关键帧」提示 */
     const val FRAME_RESYNC: Byte = 0x05
 
     /** 编码方式 */
     const val ENCODER_H264 = "h264"
+    const val ENCODER_H265 = "h265"
     const val ENCODER_JPEG = "jpeg"
+
+    // ---------------------------------------------------------------- 实验性功能
+    /** 免责声明版本：与 /disclaimer.html 保持一致，更新时旧同意自动失效 */
+    const val EXP_VERSION = "1.0"
+
+    /** 单次远程控制最长时长（与服务端 30 分钟上限对齐，仅用于界面提示） */
+    const val CONTROL_MAX_MINUTES = 30
 
     const val KEY_ENCODER = "encoder"
 
@@ -126,9 +141,10 @@ object AppConfig {
         return (if (secure) "https://" else "http://") + base
     }
 
-    /** 服务条款 / 隐私政策地址 */
+    /** 服务条款 / 隐私政策 / 实验性功能免责声明地址 */
     fun termsUrl(server: String): String = httpBase(server) + "/terms.html"
     fun privacyUrl(server: String): String = httpBase(server) + "/privacy.html"
+    fun disclaimerUrl(server: String): String = httpBase(server) + "/disclaimer.html"
 
     fun isValidServer(server: String): Boolean {
         val s = server.trim()

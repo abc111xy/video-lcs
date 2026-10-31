@@ -25,7 +25,9 @@ class RelayClient(
     private val listener: Listener,
     private val token: String? = null,
     private val privateRoom: Boolean = false,
-    private val title: String = ""
+    private val title: String = "",
+    /** 昵称：主播端显示在浮窗，接收端用于「谁在申请控制」 */
+    private val displayName: String = ""
 ) {
 
     interface Listener {
@@ -90,7 +92,7 @@ class RelayClient(
                     .put("type", "join")
                     .put("room", room)
                     .put("role", role)
-                    .put("name", "android-${role}")
+                    .put("name", displayName.ifBlank { "android-$role" })
                 // 开播需要登录态；隐私模式让房间不出现在大厅
                 if (!token.isNullOrEmpty()) join.put("token", token)
                 if (role == "sender") {
@@ -165,14 +167,14 @@ class RelayClient(
     }
 
     /**
-     * 发送 H.264 编码帧（Annex-B 访问单元）。
-     * 前置 0x03 标记与视频/音频区分。
+     * 发送编码帧（Annex-B 访问单元）。
+     * 前置 0x03（H.264）或 0x06（H.265）标记，与视频/音频区分。
      */
-    fun sendVideoH264(au: ByteArray): Boolean {
+    fun sendVideo(au: ByteArray, hevc: Boolean): Boolean {
         val ws = socket ?: return false
         if (ws.queueSize() > hardCapBytes) return false
         val msg = ByteArray(au.size + 1)
-        msg[0] = AppConfig.FRAME_VIDEO_H264
+        msg[0] = if (hevc) AppConfig.FRAME_VIDEO_HEVC else AppConfig.FRAME_VIDEO_H264
         System.arraycopy(au, 0, msg, 1, au.size)
         return try {
             ws.send(msg.toByteString())
@@ -199,10 +201,10 @@ class RelayClient(
      * 下发 H.264 编解码配置：0x04 + 宽(2字节) + 高(2字节) + csd-0。
      * 接收端据此初始化 MediaCodec，中途加入也能立刻配置好解码器。
      */
-    fun sendCodecConfig(csd: ByteArray, width: Int, height: Int): Boolean {
+    fun sendCodecConfig(csd: ByteArray, width: Int, height: Int, hevc: Boolean): Boolean {
         val ws = socket ?: return false
         val msg = ByteArray(5 + csd.size)
-        msg[0] = AppConfig.FRAME_CODEC_CONFIG
+        msg[0] = if (hevc) AppConfig.FRAME_CODEC_CONFIG_HEVC else AppConfig.FRAME_CODEC_CONFIG
         msg[1] = ((width shr 8) and 0xFF).toByte()
         msg[2] = (width and 0xFF).toByte()
         msg[3] = ((height shr 8) and 0xFF).toByte()
@@ -215,7 +217,7 @@ class RelayClient(
         }
     }
 
-    fun sendMeta(width: Int, height: Int, fps: Int, quality: Int): Boolean {
+    fun sendMeta(width: Int, height: Int, fps: Int, quality: Int, codec: String): Boolean {
         val ws = socket ?: return false
         val json = JSONObject()
             .put("type", "meta")
@@ -223,6 +225,7 @@ class RelayClient(
             .put("height", height)
             .put("fps", fps)
             .put("quality", quality)
+            .put("codec", codec)
         return try {
             ws.send(json.toString())
         } catch (e: Exception) {
@@ -238,6 +241,29 @@ class RelayClient(
             // ignore
         }
     }
+
+    // ------------------------------------------------------------ 远程控制信令
+    fun sendJson(obj: JSONObject): Boolean {
+        val ws = socket ?: return false
+        return try {
+            ws.send(obj.toString())
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** 主播答复控制申请：to 为申请方的 cid */
+    fun sendControlResponse(to: String, allow: Boolean, reason: String? = null): Boolean {
+        val obj = JSONObject()
+            .put("type", "control-response")
+            .put("to", to)
+            .put("allow", allow)
+        if (!allow && !reason.isNullOrBlank()) obj.put("reason", reason)
+        return sendJson(obj)
+    }
+
+    /** 结束控制（主播收回，或接收端主动退出） */
+    fun sendControlEnd(): Boolean = sendJson(JSONObject().put("type", "control-end"))
 
     fun droppedFrames(): Long = dropped.get()
 

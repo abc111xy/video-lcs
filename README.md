@@ -1,10 +1,10 @@
 # StreamCast · 流式频传输平台
 
-把一台 Android 手机的屏幕实时传到另一台手机或浏览器：**采集 → 中继 → 播放**。自带账号体系、用户中心、隐私房间与设备音频同步。
+把一台 Android 手机的屏幕实时传到另一台手机或浏览器：**采集 → 中继 → 播放**。自带账号体系、用户中心、隐私房间与设备音频同步，并提供 H.265 传输与远程控制两项实验性能力。
 
 - **发送端 / 接收端同一个 APK**（原生 Kotlin）
 - **中继服务**：Node.js + WebSocket，房间式转发，可单机部署
-- **网页接收端**：打开链接即可观看，支持 H.264 硬解、全屏与亮/暗主题
+- **网页接收端**：打开链接即可观看，支持 H.264 / H.265 解码、全屏与亮/暗主题
 - **数据存储**：PostgreSQL（用户、会话、验证码、资料、开播审计）
 - **邮件**：默认「直投 MX」，无需任何第三方账号
 
@@ -19,6 +19,8 @@
 | 账号 | 邮箱验证码注册、PBKDF2 口令、30 天会话 |
 | 用户中心 | 头像（Base64 入库）、昵称、主题（暗/亮/跟随系统）、协议、仓库、退出、注销 |
 | 传输优化 | 自适应码率、拥塞闸门、重同步、单房间独享加速 |
+| H.265（实验） | HEVC 硬编硬解，同画质省 30%~50% 带宽；设备不支持时自动回退 H.264 |
+| 远程控制（实验） | 主播授权后，观看端可点击/滑动其屏幕；浮窗确认、单控制者、30 分钟上限、随时收回 |
 
 ## 架构
 
@@ -40,7 +42,20 @@ Android 发送端                     中继服务                      接收�
 | `0x03` | 视频帧（H.264 Annex-B 访问单元） |
 | `0x04` | 编码器配置（SPS/PPS） |
 | `0x05` | 重同步信号：接收端丢弃旧数据，从下一个 IDR 重新开始 |
+| `0x06` | 视频帧（H.265 / HEVC Annex-B 访问单元，实验性） |
+| `0x07` | H.265 编码器配置（VPS/SPS/PPS，实验性） |
 | 裸 JPEG | 兼容模式，以 `0xFFD8` 开头，不加前缀 |
+
+### 控制信令（WebSocket 文本帧，实验性）
+
+| 方向 | 消息 | 说明 |
+|---|---|---|
+| 接收端 → 服务端 | `control-request` | 申请控制；服务端排队，同一时刻仅一个待处理申请 |
+| 服务端 → 主播 | `control-request {from,name}` | 携带申请方 cid 与昵称，主播端浮窗弹出 |
+| 主播 → 服务端 | `control-response {to,allow,reason}` | `to` 为申请方 cid |
+| 接收端 → 服务端 → 主播 | `control-input {action,x,y,...}` | 仅当前控制者可发；`tap`/`swipe`/`key` |
+| 任一方 | `control-end` | 退出或强制收回控制 |
+| 服务端 → 房间 | `control-state {active,name}` | 让所有人知道当前是否有人控制 |
 
 ## 目录
 
@@ -51,12 +66,14 @@ stream-server/            中继后端
   lib/auth.js             注册 / 登录 / 令牌 / 验证码 / 资料 / 注销
   lib/mailer.js           邮件投递（直投 MX / Resend / AgentMail，自动择一）
   lib/smtp-direct.js      直投实现（解析 MX + STARTTLS，无需第三方账号）
-  public/                 首页、网页接收端、登录、用户中心、协议
+  public/                 首页、网页接收端、登录、用户中心、协议、实验性功能声明
   scripts/create-user.js  管理员开户（邮件不可用时的兜底）
 
 streamcast-android/       Android 客户端（Kotlin）
-  StreamService.kt        屏幕采集 + 推流前台服务
-  H264Encoder.kt / H264Player.kt   硬件编解码
+  StreamService.kt        屏幕采集 + 推流前台服务 + 远程控制仲裁
+  VideoEncoder.kt / VideoPlayer.kt 硬件编解码（H.264 / H.265）
+  RemoteControlService.kt 无障碍服务：只执行手势，不读屏
+  ExpDisclaimer.kt        实验性功能强制阅读弹窗
   AacPlayer.kt            音频解码播放
   RelayClient.kt          WebSocket 客户端（自适应码率）
   CongestionGate.kt       拥塞闸门（防缓冲膨胀）
@@ -94,6 +111,31 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 https://你的域名/watch.html?room=房间号&auto=1
 ```
 
+## 实验性功能
+
+两项能力默认关闭，开启前必须阅读并同意《实验性功能免责声明》（网页 `/disclaimer.html`，App 内为强制滚动 + 勾选）。
+
+### H.265（HEVC）
+
+- 发送端选择「H.265 实验」后使用 `MediaCodec` HEVC 硬编；参数集随关键帧内联（`PREPEND_HEADER_TO_SYNC_FRAMES`）
+- 设备无 HEVC 编码器时自动回退 H.264，再不支持则回退 JPEG，并在界面提示
+- 网页端通过 WebCodecs 解码；浏览器不支持 HEVC 时明确提示改用 App 接收端
+
+### 远程控制
+
+```
+观看端「申请控制」→ 服务端排队 → 主播浮窗变大，显示「×× 申请控制」→ 通过 / 拒绝
+      → 通过后观看端点击/滑动画面 → 归一化坐标(0..1) → 主播端换算为屏幕像素
+      → AccessibilityService.dispatchGesture 执行 → 任一方「退出控制」立即失效
+```
+
+安全边界：
+
+- 无障碍服务只声明 `canPerformGestures`，**不声明** `canRetrieveWindowContent`，无法读屏
+- 服务端维护唯一控制者，非控制者的输入直接丢弃；输入按 60 次/秒限流
+- 单次最长 30 分钟；主播可随时收回；控制者断线、直播结束、关闭无障碍服务都会立即失效
+- 申请/批准/拒绝/结束写入 `control_audit` 表，**不记录**手势内容与画面
+
 ## 邮件投递
 
 默认**直投**：解析收件域 MX 后直接 SMTP 投递，不需要账号或密钥（多数云环境只封 465/587，不封出站 25）。
@@ -110,6 +152,7 @@ https://你的域名/watch.html?room=房间号&auto=1
 - 未登录无法开播（服务端强制），开播写审计表
 - 隐私模式房间不进大厅；注销需复核密码并级联删除数据
 - 头像仅接受 PNG/JPEG/WebP DataURL 且限制 64KB，防 XSS 与滥用
+- 远程控制由服务端仲裁唯一控制者，输入做白名单与限流校验，所有授权变化写审计表
 
 ## 许可
 

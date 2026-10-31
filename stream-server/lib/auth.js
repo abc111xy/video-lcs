@@ -11,7 +11,7 @@ const CODE_RESEND_MS = 60 * 1000;
 const CODE_MAX_ATTEMPTS = 5;
 const TOKEN_TTL_MS = 30 * 24 * 3600 * 1000;
 const PBKDF2_ITERATIONS = 210000;
-const TERMS_VERSION = '1.1';
+const TERMS_VERSION = '1.2';
 
 // ---------------------------------------------------------------- 工具
 function normalizeEmail(email) {

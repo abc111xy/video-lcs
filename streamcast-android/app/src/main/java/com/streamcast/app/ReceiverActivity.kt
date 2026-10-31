@@ -55,18 +55,35 @@ class ReceiverActivity : AppCompatActivity(), RelayClient.Listener {
     @Volatile
     private var h264Mode = false
 
+    /** 当前是否为 H.265 硬件解码 */
+    @Volatile
+    private var hevcMode = false
+
+    // ---- 远程控制（实验性） ----
+    /** 0 未申请 / 1 等待主播确认 / 2 控制中 */
+    private var controlState = 0
+    private var controllerName = ""
+    private var ctrlDownAt = 0L
+    private var ctrlDownX = 0f
+    private var ctrlDownY = 0f
+    private var ctrlMoved = false
+
     @Volatile
     private var videoWidth = 0
 
     @Volatile
     private var videoHeight = 0
 
-    private val h264Player: H264Player by lazy { H264Player(binding.textureView) }
+    private val videoPlayer: VideoPlayer by lazy { VideoPlayer(binding.textureView) }
 
     private val statsTask = object : Runnable {
         override fun run() {
             val audioPart = if (audioFrames > 0) " ｜ 音频 $audioFrames 帧" else ""
-            val codec = if (h264Mode) "H.264" else "JPEG"
+            val codec = when {
+                hevcMode -> "H.265"
+                h264Mode -> "H.264"
+                else -> "JPEG"
+            }
             val text = "帧率 $windowFrames fps ｜ $codec ｜ 分辨率 $resolution ｜ " +
                     "${"%.1f".format(windowBytes / 1024.0)} KB/s$audioPart"
             binding.tvStats.text = text
@@ -96,6 +113,15 @@ class ReceiverActivity : AppCompatActivity(), RelayClient.Listener {
         )
 
         binding.btnConnect.setOnClickListener { connect() }
+        binding.btnCtrl.setOnClickListener { onControlButton() }
+        binding.btnCtrlExit.setOnClickListener { exitControl() }
+        binding.btnKeyBack.setOnClickListener { sendControlKey("back") }
+        binding.btnKeyHome.setOnClickListener { sendControlKey("home") }
+        binding.btnKeyRecents.setOnClickListener { sendControlKey("recents") }
+        // 控制模式下拦截画面触摸；其余情况返回 false，保持「点击全屏」等原有交互
+        binding.textureView.setOnTouchListener { v, ev -> handleControlTouch(v, ev) }
+        binding.ivFrame.setOnTouchListener { v, ev -> handleControlTouch(v, ev) }
+        updateControlUi()
         binding.btnDisconnect.setOnClickListener { disconnect("已断开") }
         binding.btnFullscreen.setOnClickListener { setFullscreen(!fullscreen) }
         binding.videoHolder.setOnClickListener {
@@ -228,7 +254,7 @@ class ReceiverActivity : AppCompatActivity(), RelayClient.Listener {
         videoHeight = 0
         h264Mode = false
         releaseAudio()
-        h264Player.release()
+        videoPlayer.release()
         currentBitmap?.let { if (!it.isRecycled) it.recycle() }
         currentBitmap = null
         binding.ivFrame.setImageDrawable(null)
@@ -243,9 +269,12 @@ class ReceiverActivity : AppCompatActivity(), RelayClient.Listener {
     private fun disconnect(statusText: String?) {
         relay?.close()
         relay = null
+        controlState = 0
+        controllerName = ""
+        updateControlUi()
         uiHandler.removeCallbacks(statsTask)
         releaseAudio()
-        h264Player.release()
+        videoPlayer.release()
         if (statusText != null) setStatus(statusText, R.color.muted)
     }
 
@@ -280,13 +309,45 @@ class ReceiverActivity : AppCompatActivity(), RelayClient.Listener {
                     setStatus("发送端已断开", R.color.err)
                     releaseAudio()
                     audioFrames = 0
-                    h264Player.release()
+                    videoPlayer.release()
                     h264Mode = false
+                    hevcMode = false
                     currentBitmap?.let { if (!it.isRecycled) it.recycle() }
                     currentBitmap = null
                     binding.ivFrame.setImageDrawable(null)
                     applyRenderMode()
                 }
+            }
+
+            // ---------------- 远程控制（实验性） ----------------
+            "control-pending" -> runOnUiThread {
+                controlState = 1
+                updateControlUi()
+                setStatus("控制申请已发送，等待主播确认…", R.color.warn)
+            }
+            "control-granted" -> runOnUiThread {
+                controlState = 2
+                controllerName = ""
+                updateControlUi()
+                setStatus("已获得控制权：点按或滑动画面即可操作对方手机", R.color.ok)
+            }
+            "control-denied" -> runOnUiThread {
+                controlState = 0
+                updateControlUi()
+                setStatus(json.optString("reason", "主播拒绝了控制申请"), R.color.err)
+            }
+            "control-end" -> runOnUiThread {
+                val had = controlState == 2
+                controlState = 0
+                controllerName = ""
+                updateControlUi()
+                if (had) setStatus(json.optString("reason", "控制已结束"), R.color.warn)
+            }
+            "control-state" -> runOnUiThread {
+                val active = json.optBoolean("active", false)
+                controllerName = if (active) json.optString("name") else ""
+                // 自己正在控制时，不被房间广播覆盖
+                if (controlState != 2) updateControlUi()
             }
         }
     }
@@ -306,13 +367,18 @@ class ReceiverActivity : AppCompatActivity(), RelayClient.Listener {
             }
 
             AppConfig.FRAME_CODEC_CONFIG -> {
-                handleCodecConfig(bytes)
+                handleCodecConfig(bytes, false)
+                return
+            }
+
+            AppConfig.FRAME_CODEC_CONFIG_HEVC -> {
+                handleCodecConfig(bytes, true)
                 return
             }
 
             AppConfig.FRAME_RESYNC -> {
                 // 发送端丢弃了积压，立刻跳到下一个关键帧，把延迟拉回实时
-                h264Player.resync()
+                videoPlayer.resync()
                 return
             }
 
@@ -321,7 +387,20 @@ class ReceiverActivity : AppCompatActivity(), RelayClient.Listener {
                     h264Mode = true
                     runOnUiThread { applyRenderMode() }
                 }
-                h264Player.submit(bytes, 1)
+                videoPlayer.submit(bytes, 1, false)
+                frameCount++
+                windowFrames++
+                windowBytes += bytes.size
+                if (videoWidth > 0) resolution = "${videoWidth}×${videoHeight}"
+                return
+            }
+
+            AppConfig.FRAME_VIDEO_HEVC -> {
+                if (!h264Mode) {
+                    h264Mode = true
+                    runOnUiThread { applyRenderMode() }
+                }
+                videoPlayer.submit(bytes, 1, true)
                 frameCount++
                 windowFrames++
                 windowBytes += bytes.size
@@ -350,8 +429,8 @@ class ReceiverActivity : AppCompatActivity(), RelayClient.Listener {
         }
     }
 
-    /** 0x04：宽(2 字节) + 高(2 字节) + csd-0 */
-    private fun handleCodecConfig(bytes: ByteArray) {
+    /** 0x04 / 0x07：宽(2 字节) + 高(2 字节) + 参数集 */
+    private fun handleCodecConfig(bytes: ByteArray, hevc: Boolean) {
         if (bytes.size < 6) return
         val w = ((bytes[1].toInt() and 0xFF) shl 8) or (bytes[2].toInt() and 0xFF)
         val h = ((bytes[3].toInt() and 0xFF) shl 8) or (bytes[4].toInt() and 0xFF)
@@ -361,7 +440,8 @@ class ReceiverActivity : AppCompatActivity(), RelayClient.Listener {
         videoWidth = w
         videoHeight = h
         resolution = "$w×$h"
-        h264Player.onConfig(w, h, csd)
+        hevcMode = hevc
+        videoPlayer.onConfig(w, h, csd, hevc)
 
         h264Mode = true
         runOnUiThread {
@@ -386,6 +466,133 @@ class ReceiverActivity : AppCompatActivity(), RelayClient.Listener {
 
     override fun onFailure(message: String) {
         runOnUiThread { setStatus("连接失败：$message", R.color.err) }
+    }
+
+    // ------------------------------------------------------------ 远程控制（实验性）
+    private fun onControlButton() {
+        if (relay == null) {
+            setStatus("请先连接房间，再申请控制", R.color.warn)
+            return
+        }
+        if (controlState == 2) {
+            exitControl()
+            return
+        }
+        if (controlState == 1) return
+
+        ExpDisclaimer.require(this, onAccept = {
+            relay?.sendJson(JSONObject().put("type", "control-request"))
+            controlState = 1
+            updateControlUi()
+            setStatus("已发送控制申请，等待主播在悬浮窗确认…", R.color.warn)
+        })
+    }
+
+    private fun exitControl() {
+        relay?.sendControlEnd()
+        controlState = 0
+        updateControlUi()
+        setStatus("已退出控制", R.color.muted)
+    }
+
+    private fun updateControlUi() {
+        when {
+            controlState == 2 -> {
+                binding.btnCtrl.text = "退出控制"
+                binding.btnCtrl.isEnabled = true
+                binding.btnCtrl.setTextColor(ContextCompat.getColor(this, R.color.err))
+                binding.ctrlBar.visibility = View.VISIBLE
+            }
+            controlState == 1 -> {
+                binding.btnCtrl.text = "等待主播确认…"
+                binding.btnCtrl.isEnabled = false
+                binding.btnCtrl.setTextColor(ContextCompat.getColor(this, R.color.muted))
+                binding.ctrlBar.visibility = View.GONE
+            }
+            controllerName.isNotBlank() -> {
+                binding.btnCtrl.text = "$controllerName 正在控制"
+                binding.btnCtrl.isEnabled = false
+                binding.btnCtrl.setTextColor(ContextCompat.getColor(this, R.color.muted))
+                binding.ctrlBar.visibility = View.GONE
+            }
+            else -> {
+                binding.btnCtrl.text = "申请控制（实验）"
+                binding.btnCtrl.isEnabled = true
+                binding.btnCtrl.setTextColor(ContextCompat.getColor(this, R.color.warn))
+                binding.ctrlBar.visibility = View.GONE
+            }
+        }
+    }
+
+    /**
+     * 控制模式下的画面触摸：归一化为 0..1 后交给发送端换算成真实屏幕坐标。
+     * 因为 TextureView / ImageView 都按视频宽高比等比缩放，视图坐标系即画面坐标系。
+     */
+    private fun handleControlTouch(v: View, ev: android.view.MotionEvent): Boolean {
+        if (controlState != 2) return false
+        if (v.width <= 0 || v.height <= 0) return false
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                ctrlDownAt = android.os.SystemClock.elapsedRealtime()
+                ctrlDownX = (ev.x / v.width).coerceIn(0f, 1f)
+                ctrlDownY = (ev.y / v.height).coerceIn(0f, 1f)
+                ctrlMoved = false
+                return true
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val nx = (ev.x / v.width).coerceIn(0f, 1f)
+                val ny = (ev.y / v.height).coerceIn(0f, 1f)
+                if (kotlin.math.abs(nx - ctrlDownX) > 0.012f ||
+                    kotlin.math.abs(ny - ctrlDownY) > 0.012f
+                ) ctrlMoved = true
+                return true
+            }
+            android.view.MotionEvent.ACTION_UP -> {
+                val nx = (ev.x / v.width).coerceIn(0f, 1f)
+                val ny = (ev.y / v.height).coerceIn(0f, 1f)
+                val dt = (android.os.SystemClock.elapsedRealtime() - ctrlDownAt).toInt()
+                if (!ctrlMoved && dt < 320) {
+                    sendControlTap(ctrlDownX, ctrlDownY)
+                } else {
+                    sendControlSwipe(ctrlDownX, ctrlDownY, nx, ny, dt)
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun sendControlTap(x: Float, y: Float) {
+        relay?.sendJson(
+            JSONObject()
+                .put("type", "control-input")
+                .put("action", "tap")
+                .put("x", x.toDouble())
+                .put("y", y.toDouble())
+        )
+    }
+
+    private fun sendControlSwipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Int) {
+        relay?.sendJson(
+            JSONObject()
+                .put("type", "control-input")
+                .put("action", "swipe")
+                .put("x", x1.toDouble())
+                .put("y", y1.toDouble())
+                .put("x2", x2.toDouble())
+                .put("y2", y2.toDouble())
+                .put("duration", durationMs.coerceIn(60, 1200))
+        )
+    }
+
+    private fun sendControlKey(key: String) {
+        if (controlState != 2) return
+        relay?.sendJson(
+            JSONObject()
+                .put("type", "control-input")
+                .put("action", "key")
+                .put("key", key)
+        )
     }
 
     private fun setStatus(text: String, colorRes: Int) {

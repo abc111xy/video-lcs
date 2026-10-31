@@ -45,10 +45,23 @@
     <h2>下载 App</h2>
     <div class="row">
       <a class="btn" id="downloadApk" href="/download/StreamCast.apk" download="StreamCast.apk">下载 Android 版 APK</a>
-      <span class="meta" id="apkMeta">v2.1.0 · Android 8.0 及以上</span>
+      <span class="meta" id="apkMeta">v2.2.0 · Android 8.0 及以上</span>
     </div>
     <div class="sub" style="margin:10px 0 0">
       一个 App 既是发送端也是接收端：一台手机开播，另一台手机观看。服务地址已内置，装好即可用。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>实验性功能 <span class="pill" style="border-color:var(--warn);color:var(--warn)">Beta</span></h2>
+    <div class="sub" style="margin:0 0 8px">
+      <b style="color:var(--text)">H.265 编码传输</b>：同等画质下更省带宽，需设备硬件支持；<br />
+      <b style="color:var(--text)">远程控制</b>：主播授权后，观看端可操作其手机界面（点击 / 滑动 / 返回 / 主页）。
+    </div>
+    <div class="sub" style="margin:0">
+      两项功能默认关闭。开启前必须阅读并同意
+      <a href="/disclaimer.html" style="color:var(--accent)">《实验性功能免责声明》</a>；
+      远程控制还需主播在系统设置中授予无障碍服务权限，单次最长 30 分钟，可随时收回。
     </div>
   </div>
 
@@ -79,6 +92,8 @@
     <a href="/terms.html" style="color:var(--muted)">《用户协议》</a>
     ·
     <a href="/privacy.html" style="color:var(--muted)">《隐私政策》</a>
+    ·
+    <a href="/disclaimer.html" style="color:var(--muted)">《实验性功能免责声明》</a>
     <div>开播需登录账号，观看无需登录</div>
   </div>
 </div>
@@ -103,7 +118,8 @@
           '<tr><td><b>' + r.room + '</b></td>' +
           '<td>' + (r.title ? r.title : '<span style="color:var(--muted)">-</span>') + '</td>' +
           '<td><span class="pill ' + (r.online ? 'on' : '') + '">' + (r.online ? '直播中' : '空闲') + '</span>' +
-          (r.turbo ? ' <span class="pill turbo">独享加速</span>' : '') + '</td>' +
+          (r.turbo ? ' <span class="pill turbo">独享加速</span>' : '') +
+          (r.control ? ' <span class="pill" style="border-color:var(--warn);color:var(--warn)">远程控制中</span>' : '') + '</td>' +
           '<td>' + r.receivers + '</td>' +
           '<td>' + (r.meta && r.meta.width ? (r.meta.width + '×' + r.meta.height + ' @' + (r.meta.fps || '-') + 'fps') : '-') + '</td></tr>'
         ).join('');

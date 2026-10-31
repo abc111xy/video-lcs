@@ -38,6 +38,13 @@ class FloatingWindow(private val context: Context) {
     private var collapsed = false
     private var onStopAction: (() -> Unit)? = null
 
+    /** 控制卡是否可见（申请中 / 控制中），可见时不自动折叠 */
+    private var controlVisible = false
+
+    /** 被控制卡暂存的状态标题，收起后恢复 */
+    private var statusTitle = "直播中"
+    private var statusSub = ""
+
     /** 展开态位置：用户拖动后记住，展开时回到这里 */
     private var panelX = 0
     private var panelY = 0
@@ -244,7 +251,7 @@ class FloatingWindow(private val context: Context) {
     // ------------------------------------------------------------ 折叠计时
     private fun scheduleCollapse() {
         cancelCollapse()
-        if (collapsed) return
+        if (collapsed || controlVisible) return
         val task = Runnable { collapse() }
         collapseTask = task
         handler.postDelayed(task, COLLAPSE_DELAY_MS)
@@ -262,12 +269,99 @@ class FloatingWindow(private val context: Context) {
      */
     fun update(title: String, sub: String, active: Boolean) {
         val b = binding ?: return
-        b.tvFloatTitle.text = title
+        statusTitle = title
+        statusSub = sub
+        if (!controlVisible) b.tvFloatTitle.text = title
         b.tvFloatSub.text = sub
         b.tvFloatSub.visibility = if (sub.isEmpty()) View.GONE else View.VISIBLE
         val colorRes = if (active) R.color.ok else R.color.warn
         b.dotFloat.background.mutate().setTint(context.getColor(colorRes))
         b.dotBubble.background.mutate().setTint(context.getColor(colorRes))
+    }
+
+    // ------------------------------------------------------------ 远程控制卡
+    /**
+     * 弹出控制申请：强制展开面板并显示「通过 / 拒绝」。
+     * 面板从单行状态条扩展为带卡片的纵向布局，视觉上明显变大，
+     * 避免主播错过申请。
+     */
+    fun showControlRequest(name: String, onAllow: () -> Unit, onDeny: () -> Unit) {
+        val b = binding ?: return
+        controlVisible = true
+        expand()
+        cancelCollapse()
+
+        b.controlSection.visibility = View.VISIBLE
+        b.tvCtrlName.text = "$name 申请控制你的手机"
+        b.tvCtrlHint.text = "通过后对方可点击、滑动你的屏幕，可随时退出"
+        b.btnCtrlAllow.visibility = View.VISIBLE
+        b.btnCtrlDeny.visibility = View.VISIBLE
+        b.btnCtrlExit.visibility = View.GONE
+        b.tvFloatTitle.text = "远程控制申请"
+
+        b.btnCtrlAllow.setOnClickListener { onAllow() }
+        b.btnCtrlDeny.setOnClickListener { onDeny() }
+        b.btnCtrlExit.setOnClickListener(null)
+        relayoutPanel()
+    }
+
+    /** 控制进行中：显示「退出控制」，主播可随时收回 */
+    fun showControlActive(name: String, onExit: () -> Unit) {
+        val b = binding ?: return
+        controlVisible = true
+        expand()
+        cancelCollapse()
+
+        b.controlSection.visibility = View.VISIBLE
+        b.tvCtrlName.text = "$name 正在控制"
+        b.tvCtrlHint.text = "对方可操作本机界面，点「退出控制」立即收回"
+        b.btnCtrlAllow.visibility = View.GONE
+        b.btnCtrlDeny.visibility = View.GONE
+        b.btnCtrlExit.visibility = View.VISIBLE
+        b.tvFloatTitle.text = "远程控制中"
+
+        b.btnCtrlExit.setOnClickListener { onExit() }
+        b.btnCtrlAllow.setOnClickListener(null)
+        b.btnCtrlDeny.setOnClickListener(null)
+        relayoutPanel()
+    }
+
+    /** 控制结束 / 被拒绝：收起控制卡，回到常规状态条 */
+    fun clearControlPanel() {
+        val b = binding ?: return
+        if (!controlVisible) return
+        controlVisible = false
+        b.controlSection.visibility = View.GONE
+        b.btnCtrlAllow.setOnClickListener(null)
+        b.btnCtrlDeny.setOnClickListener(null)
+        b.btnCtrlExit.setOnClickListener(null)
+        b.tvFloatTitle.text = statusTitle
+        b.tvFloatSub.text = statusSub
+        b.tvFloatSub.visibility = if (statusSub.isEmpty()) View.GONE else View.VISIBLE
+        relayoutPanel()
+        scheduleCollapse()
+    }
+
+    fun isControlVisible(): Boolean = controlVisible
+
+    /** 面板尺寸变化后重新夹取位置，避免控制卡伸出屏幕外 */
+    private fun relayoutPanel() {
+        val root = rootView ?: return
+        val lp = params ?: return
+        root.post {
+            val b = binding ?: return@post
+            b.panelExpanded.measure(
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+            val w = if (b.panelExpanded.measuredWidth > 0) b.panelExpanded.measuredWidth else dp(240)
+            val h = if (b.panelExpanded.measuredHeight > 0) b.panelExpanded.measuredHeight else dp(60)
+            lp.x = lp.x.coerceIn(0, (screenWidth() - w).coerceAtLeast(0))
+            lp.y = FloatingGeometry.clampY(lp.y, dp(MIN_Y_DP), h, screenHeight())
+            panelX = lp.x
+            panelY = lp.y
+            updateLayout()
+        }
     }
 
     fun hide() {

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  远程控制（实验性功能）的无障碍服务声明。
+  刻意不声明 canRetrieveWindowContent：本服务无法读取屏幕文字、控件树或输入内容，
+  只具备执行手势（canPerformGestures）这一项能力。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/accessibility_desc"
+    android:notificationTimeout="100"
+    android:summary="@string/accessibility_summary" />

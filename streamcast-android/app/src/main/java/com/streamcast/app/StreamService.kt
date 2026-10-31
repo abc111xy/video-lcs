@@ -75,6 +75,7 @@ class StreamService : Service() {
         const val EXTRA_TOKEN = "token"
         const val EXTRA_PRIVATE = "private"
         const val EXTRA_TITLE = "title"
+        const val EXTRA_REMOTE_CONTROL = "remoteControl"
 
         private const val MODE_H264 = 1
         private const val MODE_JPEG = 2
@@ -124,10 +125,12 @@ class StreamService : Service() {
     /** 分辨率预设（短边像素，0 表示手机原生） */
     private var resolutionPreset = AppConfig.DEFAULT_RESOLUTION
 
-    // ---- 视频编码：默认硬件 H.264，失败自动回退 JPEG ----
+    // ---- 视频编码：默认硬件 H.264，可选实验性 H.265，失败逐级回退 ----
     private var useH264 = true
+    /** 实验性：使用 H.265（HEVC）硬件编码 */
+    private var hevcMode = false
     private var captureMode = MODE_JPEG
-    private var encoder: H264Encoder? = null
+    private var encoder: VideoEncoder? = null
     private var encoderSurface: Surface? = null
     private var h264FramesSent = 0L
 
@@ -163,6 +166,16 @@ class StreamService : Service() {
     private var authToken = ""
     private var privateRoom = false
     private var roomTitle = ""
+
+    // ---- 远程控制（实验性功能） ----
+    private var remoteControlEnabled = false
+    @Volatile
+    private var pendingCid: String? = null
+    @Volatile
+    private var activeCid: String? = null
+    @Volatile
+    private var activeName: String? = null
+    private var displayName = ""
 
     @Volatile
     private var capturing = false
@@ -270,8 +283,12 @@ class StreamService : Service() {
             ?: AppConfig.DEFAULT_RESOLUTION
         audioEnabled = intent?.getBooleanExtra(EXTRA_AUDIO, AppConfig.DEFAULT_AUDIO)
             ?: AppConfig.DEFAULT_AUDIO
-        useH264 = (intent?.getStringExtra(EXTRA_ENCODER) ?: AppConfig.ENCODER_H264) !=
-                AppConfig.ENCODER_JPEG
+        val encMode = intent?.getStringExtra(EXTRA_ENCODER) ?: AppConfig.ENCODER_H264
+        useH264 = encMode != AppConfig.ENCODER_JPEG
+        hevcMode = encMode == AppConfig.ENCODER_H265
+        remoteControlEnabled = intent?.getBooleanExtra(EXTRA_REMOTE_CONTROL, false) ?: false
+        displayName = getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE)
+            .getString(AppConfig.KEY_NICKNAME, "").orEmpty()
         // 60fps 对应 16ms 间隔；不设更小值，避免把采集线程压到无意义的忙等
         frameIntervalMs = (1000L / currentFps).coerceAtLeast(16L)
 
@@ -543,7 +560,7 @@ class StreamService : Service() {
         )
 
         // 优先硬件 H.264（CPU 与带宽都低一个数量级）；初始化失败则自动回退 JPEG
-        if (useH264 && startH264Capture(w, h)) {
+        if (useH264 && startHardwareCapture(w, h)) {
             registerDisplayListener()
             startH264Watchdog()
             startAbrTicker()
@@ -554,11 +571,24 @@ class StreamService : Service() {
         registerDisplayListener()
     }
 
-    /** H.264：VirtualDisplay 直接输出到编码器输入 Surface，全程不经过 Bitmap */
-    private fun startH264Capture(width: Int, height: Int): Boolean {
-        var enc: H264Encoder? = null
+    /**
+     * 硬件编码：VirtualDisplay 直接输出到编码器输入 Surface，全程不经过 Bitmap。
+     * H.265 为实验性功能，设备不支持时自动回退 H.264，再不行回退 JPEG。
+     */
+    private fun startHardwareCapture(width: Int, height: Int): Boolean {
+        if (tryStartHardware(width, height, hevcMode)) return true
+        if (hevcMode) {
+            hevcMode = false
+            postState("本机不支持 H.265 硬件编码，已回退 H.264")
+            if (tryStartHardware(width, height, false)) return true
+        }
+        return false
+    }
+
+    private fun tryStartHardware(width: Int, height: Int, hevc: Boolean): Boolean {
+        var enc: VideoEncoder? = null
         return try {
-            enc = buildEncoder(width, height)
+            enc = buildEncoder(width, height, hevc)
             val surface = enc.start()
             val vd = projection?.createVirtualDisplay(
                 "streamcast-capture",
@@ -610,22 +640,30 @@ class StreamService : Service() {
         captureMode = MODE_JPEG
     }
 
-    private fun buildEncoder(width: Int, height: Int) = H264Encoder(
+    private fun buildEncoder(width: Int, height: Int, hevc: Boolean) = VideoEncoder(
+        if (hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC,
         width,
         height,
         currentFps,
         adaptive?.currentBitrate()
             ?: AppConfig.estimateBitrate(width, height, currentFps, jpegQuality),
-        onConfig = { csd -> relay?.sendCodecConfig(csd, width, height) },
-        onFrame = { au -> handleH264Frame(au) }
+        onConfig = { csd -> relay?.sendCodecConfig(csd, width, height, hevc) },
+        onFrame = { au -> handleVideoFrame(au, hevc) }
     )
+
+    /** 当前实际编码类型，随 meta 下发给接收端 */
+    private fun codecName(): String = when {
+        captureMode == MODE_JPEG -> "jpeg"
+        hevcMode -> "hevc"
+        else -> "h264"
+    }
 
     /**
      * H.264 帧出口：先过拥塞闸门。
      * 积压超阈值时直接丢弃，降到低水位后再发一条重同步提示并请求关键帧，
      * 让接收端一次性跳到直播边缘（而不是继续消费几十秒前的画面）。
      */
-    private fun handleH264Frame(au: ByteArray) {
+    private fun handleVideoFrame(au: ByteArray, hevc: Boolean) {
         val pending = relay?.pendingBytes() ?: 0L
         if (gate.shouldDrop(pending)) return
 
@@ -634,7 +672,7 @@ class StreamService : Service() {
             encoder?.requestKeyframe()
         }
 
-        if (relay?.sendVideoH264(au) == true) {
+        if (relay?.sendVideo(au, hevc) == true) {
             h264FramesSent++
             framesSentTotal++
             bytesSentTotal += au.size
@@ -698,8 +736,9 @@ class StreamService : Service() {
             imageReader = reader
             captureMode = MODE_JPEG
             useH264 = false
+            hevcMode = false
             old?.stop()
-            relay?.sendMeta(captureWidth, captureHeight, currentFps, jpegQuality)
+            relay?.sendMeta(captureWidth, captureHeight, currentFps, jpegQuality, codecName())
         } catch (e: Exception) {
             postState("切换兼容模式失败：${e.message ?: e.javaClass.simpleName}")
         }
@@ -754,16 +793,16 @@ class StreamService : Service() {
      * setSurface + resize 换掉输出面与尺寸。
      */
     private fun reconfigureCapture(width: Int, height: Int): Boolean =
-        if (captureMode == MODE_H264) reconfigureH264(width, height)
+        if (captureMode == MODE_H264) reconfigureHardware(width, height)
         else reconfigureJpeg(width, height)
 
-    /** 旋转时重建 H.264 编码器，VirtualDisplay 复用（Android 14 不允许建第二个） */
-    private fun reconfigureH264(width: Int, height: Int): Boolean {
+    /** 旋转时重建硬件编码器，VirtualDisplay 复用（Android 14 不允许建第二个） */
+    private fun reconfigureHardware(width: Int, height: Int): Boolean {
         val vd = virtualDisplay ?: return false
         val old = encoder
-        var enc: H264Encoder? = null
+        var enc: VideoEncoder? = null
         return try {
-            enc = buildEncoder(width, height)
+            enc = buildEncoder(width, height, hevcMode)
             val surface = enc.start()
             vd.setSurface(surface)
             vd.resize(width, height, resources.displayMetrics.densityDpi)
@@ -772,7 +811,7 @@ class StreamService : Service() {
             captureWidth = width
             captureHeight = height
             old?.stop()
-            relay?.sendMeta(captureWidth, captureHeight, currentFps, jpegQuality)
+            relay?.sendMeta(captureWidth, captureHeight, currentFps, jpegQuality, codecName())
             true
         } catch (e: Exception) {
             try {
@@ -835,7 +874,7 @@ class StreamService : Service() {
         }
 
         // 通知接收端新的分辨率
-        relay?.sendMeta(captureWidth, captureHeight, currentFps, jpegQuality)
+        relay?.sendMeta(captureWidth, captureHeight, currentFps, jpegQuality, codecName())
         return true
     }
 
@@ -950,48 +989,183 @@ class StreamService : Service() {
     // ------------------------------------------------------------ 网络
     private fun connectRelay() {
         postState("正在连接中继服务…")
-        val client = RelayClient(serverUrl, roomCode, "sender", object : RelayClient.Listener {
-            override fun onConnecting() {
-                postState("正在连接中继服务…")
-            }
+        val client = RelayClient(
+            serverUrl,
+            roomCode,
+            "sender",
+            object : RelayClient.Listener {
+                override fun onConnecting() {
+                    postState("正在连接中继服务…")
+                }
 
-            override fun onConnected(room: String) {
-                postState("已进入房间 $room，等待观众接入")
-                relay?.sendMeta(captureWidth, captureHeight, currentFps, jpegQuality)
-            }
+                override fun onConnected(room: String) {
+                    postState("已进入房间 $room，等待观众接入")
+                    relay?.sendMeta(captureWidth, captureHeight, currentFps, jpegQuality, codecName())
+                }
 
-            override fun onControl(type: String, json: JSONObject) {
-                when (type) {
-                    "stats" -> {
-                        // 仅更新计数，实际 UI 刷新由采集线程按秒节流统一发出
-                        viewers = json.optInt("receivers", 0)
-                        turboMode = json.optBoolean("turbo", false)
-                    }
-                    "request-keyframe" -> encoder?.requestKeyframe()
-                    "peer-joined" -> {
-                        if (json.optString("role") == "receiver") {
-                            relay?.sendMeta(captureWidth, captureHeight, currentFps, jpegQuality)
-                            // 新观众进来，立刻给一个关键帧，避免等 2 秒才出画
-                            encoder?.requestKeyframe()
+                override fun onControl(type: String, json: JSONObject) {
+                    when (type) {
+                        "stats" -> {
+                            // 仅更新计数，实际 UI 刷新由采集线程按秒节流统一发出
+                            viewers = json.optInt("receivers", 0)
+                            turboMode = json.optBoolean("turbo", false)
+                        }
+                        "request-keyframe" -> encoder?.requestKeyframe()
+                        "peer-joined" -> {
+                            if (json.optString("role") == "receiver") {
+                                relay?.sendMeta(
+                                    captureWidth, captureHeight, currentFps, jpegQuality, codecName()
+                                )
+                                // 新观众进来，立刻给一个关键帧，避免等 2 秒才出画
+                                encoder?.requestKeyframe()
+                            }
+                        }
+                        // ---------------- 远程控制（实验性） ----------------
+                        "control-request" -> onControlRequest(json)
+                        "control-input" -> handleControlInput(json)
+                        "control-end" -> {
+                            val reason = json.optString("reason", "控制已结束")
+                            mainHandler.post { clearControlState(reason) }
+                        }
+                        "control-cancelled" -> mainHandler.post {
+                            pendingCid = null
+                            floating?.clearControlPanel()
                         }
                     }
                 }
-            }
 
-            override fun onFrame(bytes: ByteArray) {
-                // 发送端不接收视频帧
-            }
+                override fun onFrame(bytes: ByteArray) {
+                    // 发送端不接收视频帧
+                }
 
-            override fun onClosed(reason: String) {
-                postState("中继连接已断开")
-            }
+                override fun onClosed(reason: String) {
+                    postState("中继连接已断开")
+                }
 
-            override fun onFailure(message: String) {
-                postState("连接失败：$message")
-            }
-        }, authToken, privateRoom, roomTitle)
+                override fun onFailure(message: String) {
+                    postState("连接失败：$message")
+                }
+            },
+            authToken,
+            privateRoom,
+            roomTitle,
+            displayName
+        )
         relay = client
         client.connect()
+    }
+
+    // ------------------------------------------------------------ 远程控制（实验性）
+    /**
+     * 收到观看端的控制申请。
+     *
+     * 三道前置校验缺一不可：主播开启了远程控制、系统无障碍服务在位、当前没有其他控制者。
+     * 任一不满足都直接替主播拒绝，避免把无法执行或会互相打架的申请弹到浮窗上。
+     */
+    private fun onControlRequest(json: JSONObject) {
+        val cid = json.optString("from")
+        val name = json.optString("name", "观众")
+        if (cid.isBlank()) return
+
+        if (!remoteControlEnabled) {
+            relay?.sendControlResponse(cid, false, "主播未开启远程控制")
+            return
+        }
+        if (!RemoteControlService.isReady()) {
+            relay?.sendControlResponse(cid, false, "主播尚未授予无障碍服务权限")
+            mainHandler.post { postState("收到 $name 的控制申请，但无障碍服务未开启，已自动拒绝") }
+            return
+        }
+        if (activeCid != null) {
+            relay?.sendControlResponse(cid, false, "已有其他观众在控制")
+            return
+        }
+
+        pendingCid = cid
+        mainHandler.post {
+            floating?.showControlRequest(
+                name,
+                onAllow = { approveControl(cid, name) },
+                onDeny = { denyControl(cid) }
+            )
+            postState("$name 申请远程控制，请在悬浮窗处理")
+        }
+    }
+
+    /** 主播点「通过」：授予控制权，浮窗切换为「退出控制」 */
+    private fun approveControl(cid: String, name: String) {
+        if (!RemoteControlService.isReady()) {
+            relay?.sendControlResponse(cid, false, "主播尚未授予无障碍服务权限")
+            pendingCid = null
+            floating?.clearControlPanel()
+            postState("请先在系统设置中开启无障碍服务，再通过申请")
+            return
+        }
+        relay?.sendControlResponse(cid, true)
+        activeCid = cid
+        activeName = name
+        pendingCid = null
+        floating?.showControlActive(name) { endControlByOwner() }
+        postState("$name 已获得控制权（可随时退出）")
+    }
+
+    private fun denyControl(cid: String) {
+        relay?.sendControlResponse(cid, false, "主播拒绝了控制申请")
+        pendingCid = null
+        floating?.clearControlPanel()
+        postState("已拒绝控制申请")
+    }
+
+    /** 主播主动收回控制权 */
+    private fun endControlByOwner() {
+        relay?.sendControlEnd()
+        clearControlState("已收回控制权")
+    }
+
+    private fun clearControlState(reason: String) {
+        val had = activeCid != null || pendingCid != null
+        activeCid = null
+        activeName = null
+        pendingCid = null
+        floating?.clearControlPanel()
+        if (had) postState(reason)
+    }
+
+    /**
+     * 执行观看端发来的手势。
+     * 坐标是相对画面的 0..1 归一化值，这里按当前屏幕尺寸还原为像素；
+     * 屏幕旋转后 screenSize() 立即返回新尺寸，无需额外处理。
+     */
+    private fun handleControlInput(json: JSONObject) {
+        if (!remoteControlEnabled) return
+        if (activeCid == null) return
+
+        if (!RemoteControlService.isReady()) {
+            // 用户中途关闭了无障碍服务：立即结束控制，不能让对方继续发指令
+            mainHandler.post {
+                relay?.sendControlEnd()
+                clearControlState("无障碍服务已关闭，控制已结束")
+            }
+            return
+        }
+
+        val (sw, sh) = screenSize()
+        when (json.optString("action")) {
+            "tap" -> {
+                val x = json.optDouble("x", 0.0).toFloat() * sw
+                val y = json.optDouble("y", 0.0).toFloat() * sh
+                RemoteControlService.tap(x, y)
+            }
+            "swipe" -> {
+                val x1 = json.optDouble("x", 0.0).toFloat() * sw
+                val y1 = json.optDouble("y", 0.0).toFloat() * sh
+                val x2 = json.optDouble("x2", 0.0).toFloat() * sw
+                val y2 = json.optDouble("y2", 0.0).toFloat() * sh
+                val duration = json.optInt("duration", 220)
+                RemoteControlService.swipe(x1, y1, x2, y2, duration)
+            }
+            "key" -> RemoteControlService.key(json.optString("key"))
+        }
     }
 
     // ------------------------------------------------------------ 悬浮窗
@@ -1053,6 +1227,15 @@ class StreamService : Service() {
             // ignore
         }
         projection = null
+
+        if (activeCid != null || pendingCid != null) {
+            // 直播结束 = 授权立即失效，先通知服务端与对方，再断开
+            try { relay?.sendControlEnd() } catch (e: Exception) { /* ignore */ }
+            activeCid = null
+            activeName = null
+            pendingCid = null
+            floating?.clearControlPanel()
+        }
 
         relay?.close()
         relay = null

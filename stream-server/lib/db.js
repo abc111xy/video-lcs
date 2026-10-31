@@ -83,6 +83,18 @@ CREATE TABLE IF NOT EXISTS rooms_audit (
   is_private BOOLEAN NOT NULL DEFAULT FALSE,
   ip         TEXT
 );
+
+-- 远程控制留痕：实验性功能，必须可追溯到具体一次授权
+CREATE TABLE IF NOT EXISTS control_audit (
+  id     BIGSERIAL PRIMARY KEY,
+  at     BIGINT NOT NULL,
+  room   TEXT NOT NULL,
+  cid    TEXT,
+  name   TEXT,
+  action TEXT NOT NULL,
+  ip     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_control_audit_at ON control_audit(at);
 `;
 
 let ready = null;

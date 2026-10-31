@@ -28,14 +28,19 @@ class MainActivity : AppCompatActivity() {
     private var audioEnabled = AppConfig.DEFAULT_AUDIO
     private var encoderMode = AppConfig.ENCODER_H264
     private var privateMode = false
+    private var remoteControlEnabled = false
     private var token = ""
     private var accountEmail = ""
 
     /** 编码方式选项，与 encoderModes 一一对应 */
     private val encoderChips: List<TextView> by lazy {
-        listOf(binding.chipH264, binding.chipJpeg)
+        listOf(binding.chipH264, binding.chipH265, binding.chipJpeg)
     }
-    private val encoderModes = listOf(AppConfig.ENCODER_H264, AppConfig.ENCODER_JPEG)
+    private val encoderModes = listOf(
+        AppConfig.ENCODER_H264,
+        AppConfig.ENCODER_H265,
+        AppConfig.ENCODER_JPEG
+    )
 
     /** 分辨率选项与 AppConfig.RESOLUTION_PRESETS 一一对应 */
     private val resolutionChips: List<TextView> by lazy {
@@ -136,7 +141,17 @@ class MainActivity : AppCompatActivity() {
             ?: AppConfig.ENCODER_H264
         encoderChips.forEachIndexed { index, chip ->
             chip.setOnClickListener {
-                encoderMode = encoderModes.getOrElse(index) { AppConfig.ENCODER_H264 }
+                val mode = encoderModes.getOrElse(index) { AppConfig.ENCODER_H264 }
+                if (mode == AppConfig.ENCODER_H265 && !ExpDisclaimer.isAccepted(this)) {
+                    // 实验性功能：先读完免责声明再启用，取消则保持原选择
+                    ExpDisclaimer.require(this, onAccept = {
+                        encoderMode = AppConfig.ENCODER_H265
+                        updateEncoderChips()
+                        setStatus("H.265 已启用（实验性）：若设备不支持会自动回退 H.264", LEVEL_WARN)
+                    })
+                    return@setOnClickListener
+                }
+                encoderMode = mode
                 updateEncoderChips()
             }
         }
@@ -164,6 +179,25 @@ class MainActivity : AppCompatActivity() {
             updatePrivateHint()
         }
         updatePrivateHint()
+
+        // 远程控制：实验性功能，需先同意声明，再确保无障碍服务已启用
+        remoteControlEnabled = prefs.getBoolean(AppConfig.KEY_REMOTE_CONTROL, false)
+        binding.switchRemote.isChecked = remoteControlEnabled
+        binding.switchRemote.setOnCheckedChangeListener { _, checked ->
+            if (checked) {
+                if (!ExpDisclaimer.isAccepted(this)) {
+                    binding.switchRemote.isChecked = false
+                    ExpDisclaimer.require(this, onAccept = { enableRemoteControl() })
+                } else {
+                    enableRemoteControl()
+                }
+            } else {
+                remoteControlEnabled = false
+                prefs.edit().putBoolean(AppConfig.KEY_REMOTE_CONTROL, false).apply()
+                updateRemoteHint()
+            }
+        }
+        updateRemoteHint()
 
         binding.btnOverlay.setOnClickListener { requestOverlayPermission() }
         binding.btnNotify.setOnClickListener { requestNotificationPermission() }
@@ -268,6 +302,15 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         refreshPermissions()
         refreshControlState()
+        // 用户可能刚从系统设置返回：无障碍服务被关掉时，开关必须同步回滚
+        if (remoteControlEnabled && !isAccessibilityEnabled()) {
+            remoteControlEnabled = false
+            binding.switchRemote.isChecked = false
+            getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE).edit()
+                .putBoolean(AppConfig.KEY_REMOTE_CONTROL, false).apply()
+            setStatus("无障碍服务未启用，远程控制已自动关闭", LEVEL_WARN)
+        }
+        updateRemoteHint()
     }
 
     override fun onStop() {
@@ -337,6 +380,7 @@ class MainActivity : AppCompatActivity() {
             .putBoolean(AppConfig.KEY_AUDIO, audioEnabled)
             .putString(AppConfig.KEY_ENCODER, encoderMode)
             .putBoolean(AppConfig.KEY_PRIVATE, privateMode)
+            .putBoolean(AppConfig.KEY_REMOTE_CONTROL, remoteControlEnabled)
             .apply()
 
         if (!Settings.canDrawOverlays(this)) {
@@ -365,6 +409,7 @@ class MainActivity : AppCompatActivity() {
             putExtra(StreamService.EXTRA_TOKEN, token)
             putExtra(StreamService.EXTRA_TITLE, binding.etTitle.text.toString().trim())
             putExtra(StreamService.EXTRA_PRIVATE, privateMode)
+            putExtra(StreamService.EXTRA_REMOTE_CONTROL, remoteControlEnabled)
         }
         ContextCompat.startForegroundService(this, intent)
         setStatus("正在启动屏幕直播…", LEVEL_NORMAL)
@@ -412,10 +457,13 @@ class MainActivity : AppCompatActivity() {
             chip.setBackgroundResource(if (selected) R.drawable.bg_chip_on else R.drawable.bg_chip)
             chip.setTextColor(ContextCompat.getColor(this, if (selected) R.color.white else R.color.muted))
         }
-        binding.tvEncoderHint.text = if (encoderMode == AppConfig.ENCODER_H264) {
-            "硬件编码：CPU 与带宽低一个数量级，60fps 首选；若出现黑屏可切到兼容模式"
-        } else {
-            "逐帧压缩：兼容性最好，但高帧率下 CPU 占用高、带宽大"
+        binding.tvEncoderHint.text = when (encoderMode) {
+            AppConfig.ENCODER_H265 ->
+                "实验性：同画质码率比 H.264 低约 30%~50%，需设备支持 HEVC 硬编；不支持时自动回退"
+            AppConfig.ENCODER_H264 ->
+                "硬件编码：CPU 与带宽低一个数量级，60fps 首选；若出现黑屏可切到兼容模式"
+            else ->
+                "逐帧压缩：兼容性最好，但高帧率下 CPU 占用高、带宽大"
         }
     }
 
@@ -449,6 +497,48 @@ class MainActivity : AppCompatActivity() {
             "已开启：房间不出现在大厅，凭房间号仍可进入"
         } else {
             "关闭：房间会出现在大厅，任何人可见"
+        }
+    }
+
+    // ------------------------------------------------------------ 实验性功能
+    /** 无障碍服务是否已在系统设置中启用（以系统设置为准，避免只信进程内状态） */
+    private fun isAccessibilityEnabled(): Boolean {
+        val expected = "$packageName/${RemoteControlService::class.java.name}"
+        val enabled = try {
+            Settings.Secure.getString(
+                contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            )
+        } catch (e: Exception) {
+            null
+        } ?: return false
+        return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+    }
+
+    private fun enableRemoteControl() {
+        val prefs = getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE)
+        remoteControlEnabled = true
+        binding.switchRemote.isChecked = true
+        prefs.edit().putBoolean(AppConfig.KEY_REMOTE_CONTROL, true).apply()
+        updateRemoteHint()
+
+        if (!isAccessibilityEnabled()) {
+            setStatus("请在系统设置中启用「${getString(R.string.app_name)}」无障碍服务", LEVEL_WARN)
+            try {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            } catch (e: Exception) {
+                setStatus("无法打开无障碍设置，请手动前往系统设置开启", LEVEL_ERR)
+            }
+        } else {
+            setStatus("远程控制已开启（实验性）", LEVEL_OK)
+        }
+    }
+
+    private fun updateRemoteHint() {
+        binding.tvRemoteHint.text = when {
+            !remoteControlEnabled -> "关闭：观看端无法申请操作本机"
+            !isAccessibilityEnabled() -> "已开启，但无障碍服务未启用：请到系统设置开启，否则申请会被自动拒绝"
+            else -> "已开启：观看端可申请操作本机，浮窗可随时通过或拒绝，单次最长 ${AppConfig.CONTROL_MAX_MINUTES} 分钟"
         }
     }
 
@@ -501,6 +591,7 @@ class MainActivity : AppCompatActivity() {
         binding.sbQuality.isEnabled = !live
         binding.switchAudio.isEnabled = !live
         binding.switchPrivate.isEnabled = !live
+        binding.switchRemote.isEnabled = !live
         encoderChips.forEach { chip ->
             chip.isEnabled = !live
             chip.alpha = if (live) 0.5f else 1f

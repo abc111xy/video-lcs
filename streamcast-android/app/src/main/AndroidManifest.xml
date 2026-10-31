@@ -62,6 +62,24 @@
             android:name=".StreamService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <!--
+            远程控制（实验性功能）的 AccessibilityService。
+            由系统绑定，必须 exported="true"，并用 BIND_ACCESSIBILITY_SERVICE 权限保护，
+            保证只有系统能连接；应用自身不会、也无法主动启动它。
+        -->
+        <service
+            android:name=".RemoteControlService"
+            android:exported="true"
+            android:label="@string/remote_control_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/remote_control_service" />
+        </service>
     </application>
 
 </manifest>

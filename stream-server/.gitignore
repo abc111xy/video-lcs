@@ -3,3 +3,6 @@ node_modules/
 data/
 *.log
 .DS_Store
+
+# 构建产物：APK 不入库，部署时由 CI/本地构建后放入
+public/download/*.apk

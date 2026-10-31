@@ -2,22 +2,28 @@ package com.streamcast.app
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Bundle
 import android.view.Surface
 import java.nio.ByteBuffer
 
 /**
- * 硬件 H.264 编码器（Surface 输入）。
+ * 硬件视频编码器（Surface 输入），支持 H.264 / H.265（HEVC）。
  *
  * 关键点：画面直接从 VirtualDisplay 送进编码器的输入 Surface，
  * 全程不经过 Bitmap、不做 JPEG 压缩，因此 CPU 占用和带宽都比 JPEG 方案低一个数量级，
  * 这也是云游戏能做到 1080p60 的根本原因。
  *
- * 输出为 Annex-B 格式的 H.264 码流；开启 PREPEND_HEADER_TO_SYNC_FRAMES 后，
- * 每个关键帧前面都会带上 SPS/PPS，接收端无需额外信令也能自描述解码。
+ * H.265 为实验性功能：同画质下码率约比 H.264 低 30%~50%，
+ * 但依赖设备具备 HEVC 硬件编码器；创建失败时由调用方回退到 H.264。
+ *
+ * 输出为 Annex-B 码流；开启 PREPEND_HEADER_TO_SYNC_FRAMES 后，
+ * 每个关键帧前面都会带上参数集（H.264: SPS/PPS；H.265: VPS/SPS/PPS），
+ * 接收端无需额外信令也能自描述解码。
  */
-class H264Encoder(
+class VideoEncoder(
+    private val mime: String,
     private val width: Int,
     private val height: Int,
     private val fps: Int,
@@ -25,6 +31,9 @@ class H264Encoder(
     private val onConfig: (ByteArray) -> Unit,
     private val onFrame: (ByteArray) -> Unit
 ) {
+
+    val isHevc: Boolean
+        get() = mime == MediaFormat.MIMETYPE_VIDEO_HEVC
 
     private var codec: MediaCodec? = null
     private var inputSurface: Surface? = null
@@ -38,11 +47,7 @@ class H264Encoder(
 
     /** 启动编码器并返回供 VirtualDisplay 写入的输入 Surface */
     fun start(): Surface {
-        val format = MediaFormat.createVideoFormat(
-            MediaFormat.MIMETYPE_VIDEO_AVC,
-            width,
-            height
-        ).apply {
+        val format = MediaFormat.createVideoFormat(mime, width, height).apply {
             setInteger(
                 MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
@@ -55,11 +60,11 @@ class H264Encoder(
                 MediaFormat.KEY_BITRATE_MODE,
                 MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
             )
-            // 关键帧自带 SPS/PPS，接收端可自描述解码
+            // 关键帧自带参数集，接收端可自描述解码
             setInteger(MediaFormat.KEY_PREPEND_HEADER_TO_SYNC_FRAMES, 1)
         }
 
-        val c = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        val c = MediaCodec.createEncoderByType(mime)
         c.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         val surface = c.createInputSurface()
         c.start()
@@ -68,7 +73,7 @@ class H264Encoder(
         inputSurface = surface
         running = true
 
-        val t = Thread({ drain() }, "streamcast-h264")
+        val t = Thread({ drain() }, if (isHevc) "streamcast-hevc" else "streamcast-h264")
         drainThread = t
         t.start()
         return surface
@@ -88,9 +93,11 @@ class H264Encoder(
                     val csd = c.outputFormat.getByteBuffer("csd-0")?.let { buf ->
                         ByteArray(buf.remaining()).also { buf.get(it) }
                     }
-                    if (csd != null && csd.isNotEmpty() && !configSent) {
+                    // 少部分设备的 HEVC 编码器不返回 csd-0；
+                    // 此时也要把尺寸下发，接收端可依赖码流内联的 VPS/SPS/PPS 自描述解码
+                    if (!configSent) {
                         configSent = true
-                        onConfig(csd)
+                        onConfig(csd ?: ByteArray(0))
                     }
                 } catch (e: Exception) {
                     // 忽略
@@ -173,5 +180,26 @@ class H264Encoder(
             // ignore
         }
         inputSurface = null
+    }
+
+    companion object {
+        /** 设备是否具备 HEVC 硬件编码能力（用于界面提示，不参与编解码决策） */
+        fun hevcEncodeSupported(): Boolean = hasCodec(MediaFormat.MIMETYPE_VIDEO_HEVC, true)
+
+        /** 设备是否具备 HEVC 硬件解码能力（接收端用） */
+        fun hevcDecodeSupported(): Boolean = hasCodec(MediaFormat.MIMETYPE_VIDEO_HEVC, false)
+
+        /**
+         * 遍历系统编解码器列表判断能力。
+         * 不用 MediaCodecList 的静态查找方法：它们在部分 SDK stub 中不可见，
+         * 直接遍历 codecInfos 更稳定。
+         */
+        private fun hasCodec(mime: String, encoder: Boolean): Boolean = try {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
+                info.isEncoder == encoder && info.supportedTypes.any { it.equals(mime, true) }
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 }

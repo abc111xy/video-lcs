@@ -101,10 +101,21 @@ const MIME_TYPES = {
 /** roomId -> { sender: ws|null, receivers: Set<ws>, meta: object|null, startedAt: number } */
 const rooms = new Map();
 
+/**
+ * 远程控制（实验性功能）的服务端仲裁参数。
+ * 服务端只做三件事：排队、授予唯一控制者、对输入限流；
+ * 具体手势如何执行由发送端（被控手机）决定，服务端不解析也不存储控制内容。
+ */
+const CONTROL_REQUEST_TTL_MS = 45 * 1000;      // 申请多久无人处理自动失效
+const CONTROL_SESSION_MAX_MS = 30 * 60 * 1000; // 单次控制最长 30 分钟
+const CONTROL_INPUT_BURST = 90;                // 输入令牌桶容量（约 1.5 秒突发）
+const CONTROL_INPUT_PER_SEC = 60;              // 输入速率上限，防止刷爆被控端
+
 function getRoom(id) {
   let r = rooms.get(id);
   if (!r) {
     r = {
+      id,
       sender: null,
       receivers: new Set(),
       meta: null,
@@ -113,11 +124,94 @@ function getRoom(id) {
       turbo: false,          // 是否处于「独享加速」模式
       avgFrameBytes: 0,      // 帧大小滑动平均，用于估算缓冲预算
       droppedFrames: 0,      // 因接收端积压而丢弃的帧数
+      controller: null,      // { cid, name, since } 当前唯一控制者
+      pending: null,         // { cid, ws, name, since } 等待发送端处理的控制申请
     };
     rooms.set(id, r);
   }
   return r;
 }
+
+/** 连接级短 ID：接收端申请控制时用它指明「谁在申请」，不暴露任何账号信息 */
+function newCid() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+/** 昵称清洗：去掉控制字符与尖括号，限长，避免注入到浮窗/网页上 */
+function cleanName(name, fallback) {
+  const s = String(name == null ? '' : name)
+    .replace(/[\u0000-\u001F\u007F<>]/g, '')
+    .trim()
+    .slice(0, 20);
+  return s || fallback;
+}
+
+function clamp01(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(1, Math.max(0, n));
+}
+
+function controlAudit(roomId, cid, name, action, ip) {
+  query(
+    'INSERT INTO control_audit (at, room, cid, name, action, ip) VALUES ($1,$2,$3,$4,$5,$6)',
+    [Date.now(), roomId, cid || null, name || null, action, ip || null],
+  ).catch((e) => console.error('[audit] control_audit 写入失败:', e.message));
+}
+
+/** 输入令牌桶：超频直接丢弃，不报错（避免刷屏式错误回包） */
+function allowControlInput(ws) {
+  const now = Date.now();
+  if (!ws.inputAt) {
+    ws.inputAt = now;
+    ws.inputTokens = CONTROL_INPUT_BURST;
+  }
+  ws.inputTokens = Math.min(
+    CONTROL_INPUT_BURST,
+    ws.inputTokens + ((now - ws.inputAt) / 1000) * CONTROL_INPUT_PER_SEC,
+  );
+  ws.inputAt = now;
+  if (ws.inputTokens < 1) return false;
+  ws.inputTokens -= 1;
+  return true;
+}
+
+/** 把「当前是否有控制者」同步给房间内所有人（网页/App 据此禁用申请按钮） */
+function broadcastControlState(room) {
+  broadcast(room, {
+    type: 'control-state',
+    active: !!room.controller,
+    name: room.controller ? room.controller.name : '',
+    pending: room.pending ? room.pending.name : '',
+  });
+}
+
+/** 结束控制会话（主动退出、超时、断线、直播结束都走这里） */
+function endControl(room, reason) {
+  const c = room.controller;
+  if (!c) return false;
+  room.controller = null;
+  for (const r of room.receivers) {
+    if (r.cid === c.cid) send(r, { type: 'control-end', reason });
+  }
+  send(room.sender, { type: 'control-end', reason, cid: c.cid });
+  broadcastControlState(room);
+  controlAudit(room.id, c.cid, c.name, 'end:' + reason, null);
+  console.log(`[control] room=${room.id} 结束控制（${reason}）`);
+  return true;
+}
+
+function clearPending(room, notifySender) {
+  const p = room.pending;
+  if (!p) return;
+  room.pending = null;
+  if (p.timer) clearTimeout(p.timer);
+  if (notifySender) {
+    send(room.sender, { type: 'control-cancelled', cid: p.cid });
+  }
+  if (p.ws) send(p.ws, { type: 'control-denied', reason: '控制申请已失效' });
+}
+
 
 // ---------------------------------------------------------------- 加速策略
 /**
@@ -334,6 +428,7 @@ const server = http.createServer((req, res) => {
         startedAt: r.startedAt,
         turbo: !!r.turbo,
         dropped: r.droppedFrames || 0,
+        control: !!r.controller,
       }));
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ rooms: list }));
@@ -411,6 +506,11 @@ wss.on('connection', (ws, req) => {
           if (!roomId) { send(ws, { type: 'error', message: '缺少房间号' }); return; }
           if (ws.roomId) leaveRoom(ws);
 
+          // 每次连接分配一个短 ID：控制申请/授予都以它为准，
+          // 这样服务端不需要（也不应该）知道观众的具体身份
+          ws.cid = newCid();
+          ws.name = cleanName(msg.name, role === 'sender' ? '主播' : '观众');
+
           const room = getRoom(roomId);
           if (role === 'sender') {
             // 开播必须登录：既是内容治理的前提，也让每个直播可追溯到具体账号
@@ -434,6 +534,10 @@ wss.on('connection', (ws, req) => {
             room.title = String(msg.title || '').replace(/[\u0000-\u001F\u007F]/g, '').trim().slice(0, 40);
             room.ownerId = user.id;
             room.ownerEmail = user.email;
+            room.ownerName = ws.name;
+            // 换主播即意味着上一轮控制授权全部失效
+            if (room.controller) endControl(room, '主播更换');
+            clearPending(room, false);
 
             auth.audit(user.email, 'broadcast_start', true, ws.ip).catch(() => {});
             query(
@@ -447,9 +551,19 @@ wss.on('connection', (ws, req) => {
           ws.roomId = roomId;
           ws.role = role;
           console.log(`[join] room=${roomId} role=${role} 接收端=${room.receivers.size}`);
-          send(ws, { type: 'joined', room: roomId, role, receivers: room.receivers.size });
+          send(ws, {
+            type: 'joined',
+            room: roomId,
+            role,
+            receivers: room.receivers.size,
+            cid: ws.cid,
+            // 后加入的接收端立刻知道「有没有人正在控制」
+            control: room.controller ? { active: true, name: room.controller.name } : { active: false },
+          });
           if (role === 'receiver' && room.meta) send(ws, { type: 'meta', ...room.meta });
           broadcast(room, { type: 'peer-joined', role }, ws);
+          // 让新加入者（以及其他人）立刻拿到当前控制状态，避免误申请
+          broadcastControlState(room);
           notifyStats(room);
           refreshTurbo();
         } catch (e) {
@@ -462,10 +576,128 @@ wss.on('connection', (ws, req) => {
         if (ws.role !== 'sender' || !ws.roomId) return;
         const room = rooms.get(ws.roomId);
         if (!room) return;
-        room.meta = { width: msg.width, height: msg.height, fps: msg.fps, quality: msg.quality };
+        const codec = msg.codec === 'hevc' ? 'hevc' : msg.codec === 'jpeg' ? 'jpeg' : 'h264';
+        room.meta = {
+          width: msg.width,
+          height: msg.height,
+          fps: msg.fps,
+          quality: msg.quality,
+          codec,
+        };
         broadcast(room, { type: 'meta', ...room.meta }, ws);
         break;
       }
+
+      // ---------------------------------------------------------- 远程控制（实验性）
+      case 'control-request': {
+        if (ws.role !== 'receiver' || !ws.roomId) return;
+        const room = rooms.get(ws.roomId);
+        if (!room) return;
+        if (!room.sender || room.sender.readyState !== WebSocket.OPEN) {
+          send(ws, { type: 'control-denied', reason: '主播不在线，无法申请控制' });
+          return;
+        }
+        if (room.controller) {
+          send(ws, {
+            type: 'control-denied',
+            reason: `${room.controller.name || '其他观众'}正在控制，请稍后再试`,
+          });
+          return;
+        }
+        if (room.pending) {
+          send(ws, { type: 'control-denied', reason: '已有申请正在处理，请稍候' });
+          return;
+        }
+        room.pending = { cid: ws.cid, ws, name: ws.name, since: Date.now() };
+        // 超时自动失效：主播长时间不处理时，申请者不会一直卡在「等待中」
+        room.pending.timer = setTimeout(() => {
+          if (room.pending && room.pending.cid === ws.cid) clearPending(room, true);
+        }, CONTROL_REQUEST_TTL_MS);
+
+        send(room.sender, { type: 'control-request', from: ws.cid, name: ws.name });
+        send(ws, { type: 'control-pending' });
+        broadcastControlState(room);
+        controlAudit(ws.roomId, ws.cid, ws.name, 'request', ws.ip);
+        break;
+      }
+
+      case 'control-response': {
+        if (ws.role !== 'sender' || !ws.roomId) return;
+        const room = rooms.get(ws.roomId);
+        if (!room) return;
+        const p = room.pending;
+        if (!p || p.cid !== String(msg.to || '')) {
+          send(ws, { type: 'control-cancelled', cid: String(msg.to || '') });
+          return;
+        }
+        room.pending = null;
+        if (p.timer) clearTimeout(p.timer);
+
+        if (msg.allow === true) {
+          room.controller = { cid: p.cid, name: p.name, since: Date.now() };
+          send(p.ws, { type: 'control-granted', name: room.ownerName || '主播' });
+          controlAudit(ws.roomId, p.cid, p.name, 'grant', ws.ip);
+          console.log(`[control] room=${ws.roomId} 授予 ${p.name}(${p.cid}) 控制权`);
+        } else {
+          const reason = cleanName(msg.reason, '主播拒绝了控制申请');
+          send(p.ws, { type: 'control-denied', reason });
+          controlAudit(ws.roomId, p.cid, p.name, 'deny', ws.ip);
+        }
+        broadcastControlState(room);
+        break;
+      }
+
+      case 'control-input': {
+        if (ws.role !== 'receiver' || !ws.roomId) return;
+        const room = rooms.get(ws.roomId);
+        if (!room || !room.controller || room.controller.cid !== ws.cid) return;
+        if (!allowControlInput(ws)) return;
+
+        const action = String(msg.action || '');
+        if (action === 'tap') {
+          const x = clamp01(msg.x);
+          const y = clamp01(msg.y);
+          if (x == null || y == null) return;
+          send(room.sender, { type: 'control-input', action, x, y });
+        } else if (action === 'swipe') {
+          const x = clamp01(msg.x);
+          const y = clamp01(msg.y);
+          const x2 = clamp01(msg.x2);
+          const y2 = clamp01(msg.y2);
+          if (x == null || y == null || x2 == null || y2 == null) return;
+          const duration = Math.min(1500, Math.max(50, Number(msg.duration) || 220));
+          send(room.sender, { type: 'control-input', action, x, y, x2, y2, duration });
+        } else if (action === 'key') {
+          const key = String(msg.key || '');
+          if (!['back', 'home', 'recents', 'notifications'].includes(key)) return;
+          send(room.sender, { type: 'control-input', action, key });
+        }
+        // 其余动作一律丢弃：服务端不做「任意指令透传」
+        break;
+      }
+
+      case 'control-end': {
+        if (!ws.roomId) return;
+        const room = rooms.get(ws.roomId);
+        if (!room) return;
+        if (ws.role === 'receiver') {
+          if (room.pending && room.pending.cid === ws.cid) {
+            clearPending(room, true);
+            broadcastControlState(room);
+          } else if (room.controller && room.controller.cid === ws.cid) {
+            endControl(room, '接收端已退出控制');
+          }
+        } else if (ws.role === 'sender') {
+          // 主播随时可以强制收回控制权
+          if (room.pending) {
+            clearPending(room, false);
+            broadcastControlState(room);
+          }
+          endControl(room, '主播已收回控制权');
+        }
+        break;
+      }
+
       case 'request-keyframe': {
         if (!ws.roomId) return;
         const room = rooms.get(ws.roomId);
@@ -493,12 +725,23 @@ function leaveRoom(ws) {
   ws.role = null;
   if (!room) return;
   if (role === 'sender' && room.sender === ws) {
+    // 直播结束：所有控制授权与待处理申请立即失效
+    if (room.controller) endControl(room, '直播已结束');
+    if (room.pending) clearPending(room, false);
     room.sender = null;
     room.meta = null;
     broadcast(room, { type: 'peer-left', role: 'sender' });
     console.log(`[left] room=${roomId} 发送端离线`);
   } else if (role === 'receiver') {
     room.receivers.delete(ws);
+    // 控制者或申请者掉线，必须立刻收回/作废，不能留下「幽灵授权」
+    if (room.pending && room.pending.cid === ws.cid) {
+      clearPending(room, true);
+      broadcastControlState(room);
+    }
+    if (room.controller && room.controller.cid === ws.cid) {
+      endControl(room, '控制者已断开');
+    }
     broadcast(room, { type: 'peer-left', role: 'receiver' }, ws);
     notifyStats(room);
     console.log(`[left] room=${roomId} 接收端离线，剩余=${room.receivers.size}`);
@@ -507,13 +750,24 @@ function leaveRoom(ws) {
   refreshTurbo();
 }
 
-// 心跳：清掉假死连接
+// 心跳：清掉假死连接；顺带回收过期的控制申请与超时控制会话
 const heartbeat = setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) { try { ws.terminate(); } catch (e) {} return; }
     ws.isAlive = false;
     try { ws.ping(); } catch (e) {}
   });
+
+  const now = Date.now();
+  for (const room of rooms.values()) {
+    if (room.pending && now - room.pending.since > CONTROL_REQUEST_TTL_MS) {
+      clearPending(room, true);
+      broadcastControlState(room);
+    }
+    if (room.controller && now - room.controller.since > CONTROL_SESSION_MAX_MS) {
+      endControl(room, '控制时长已达上限');
+    }
+  }
 }, 30000);
 
 wss.on('close', () => clearInterval(heartbeat));

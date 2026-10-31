@@ -40,7 +40,7 @@
   input { width: 130px; letter-spacing: 2px; }
   button { background: var(--accent); border-color: var(--accent); font-weight: 600; cursor: pointer; }
   button.ghost { background: transparent; border-color: var(--line); color: var(--muted); }
-  button:disabled { opacity: .5; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
   .stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 8px 16px 20px; min-height: 0; }
   .screen {
     position: relative; max-width: 100%; max-height: 100%;
@@ -49,6 +49,8 @@
   }
   .screen img { display: block; max-width: 100%; max-height: 72vh; object-fit: contain; cursor: zoom-in; }
   .screen canvas { display: none; max-width: 100%; max-height: 72vh; cursor: zoom-in; }
+  /* 控制模式下改为十字准心，并禁用长按选择 */
+  .screen.ctl img, .screen.ctl canvas { cursor: crosshair; user-select: none; -webkit-user-select: none; }
   /* ---- 全屏观看：原生全屏与降级方案共用一套样式 ---- */
   .screen.fs, .screen.pseudo-fs,
   .screen:fullscreen {
@@ -73,9 +75,74 @@
   .placeholder { color: var(--muted); font-size: 13px; line-height: 2; text-align: center; padding: 60px 24px; }
   .metrics { display: flex; gap: 18px; padding: 0 16px 16px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
   .metrics b { color: var(--text); font-weight: 600; }
-  .foot { padding: 0 16px 18px; }
+  .foot { padding: 0 16px 18px; display: flex; gap: 14px; flex-wrap: wrap; }
   .foot a { color: var(--muted); font-size: 12px; text-decoration: none; border-bottom: 1px dashed var(--line); }
   .foot a:hover { color: var(--accent); }
+
+  /* ---------------- 远程控制（实验性） ---------------- */
+  .exp-tag {
+    display: inline-block; font-size: 10px; line-height: 1; padding: 3px 6px; border-radius: 4px;
+    border: 1px solid var(--warn); color: var(--warn); vertical-align: 1px; margin-left: 5px;
+  }
+  button.warn { background: transparent; border-color: var(--warn); color: var(--warn); }
+  button.danger { background: transparent; border-color: var(--err); color: var(--err); }
+
+  .ctrl-bar {
+    display: none; position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    z-index: 5; align-items: center; gap: 6px; padding: 7px 8px;
+    background: rgba(20, 26, 36, .92); border: 1px solid var(--line); border-radius: 99px;
+    backdrop-filter: blur(6px); max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: center;
+  }
+  .ctrl-bar.on { display: flex; }
+  .ctrl-bar button {
+    font-size: 12px; padding: 6px 11px; border-radius: 99px;
+    background: transparent; border-color: var(--line); color: var(--text); font-weight: 500;
+  }
+  .ctrl-bar button.danger { border-color: var(--err); color: var(--err); }
+  .ctrl-tag {
+    font-size: 11px; color: var(--err); display: inline-flex; align-items: center; gap: 5px;
+    padding: 0 6px 0 4px;
+  }
+  .ctrl-tag::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--err); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+  /* ---------------- 免责声明弹窗 ---------------- */
+  .modal-mask {
+    display: none; position: fixed; inset: 0; z-index: 10000;
+    background: rgba(4, 7, 12, .72); backdrop-filter: blur(3px);
+    align-items: center; justify-content: center; padding: 18px;
+  }
+  .modal-mask.on { display: flex; }
+  .modal {
+    width: 100%; max-width: 560px; max-height: min(86vh, 720px); display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+  }
+  .modal-head {
+    padding: 16px 18px 12px; border-bottom: 1px solid var(--line);
+    font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+  }
+  .modal-head small { font-size: 11px; font-weight: 400; color: var(--muted); margin-left: auto; }
+  .modal-body {
+    padding: 14px 18px; overflow-y: auto; font-size: 13px; line-height: 1.85; color: var(--muted);
+    -webkit-overflow-scrolling: touch;
+  }
+  .modal-body h3 { font-size: 13px; color: var(--text); margin: 14px 0 4px; }
+  .modal-body h3:first-child { margin-top: 0; }
+  .modal-body p { margin: 4px 0; }
+  .modal-body strong { color: var(--err); font-weight: 600; }
+  .modal-body ul { margin: 4px 0; padding-left: 20px; }
+  .modal-check {
+    display: flex; align-items: center; gap: 9px; padding: 12px 18px;
+    border-top: 1px solid var(--line); font-size: 13px; cursor: pointer;
+  }
+  .modal-check input { width: 17px; height: 17px; letter-spacing: 0; accent-color: var(--accent); }
+  .modal-check.disabled { opacity: .45; cursor: not-allowed; }
+  .modal-foot { display: flex; gap: 10px; padding: 0 18px 16px; }
+  .modal-foot button { flex: 1; padding: 11px; }
+  .modal-scroll-tip {
+    text-align: center; font-size: 11px; color: var(--warn); padding: 0 18px 8px;
+  }
 </style>
 </head>
 <body>
@@ -91,6 +158,7 @@
   <button id="connect">连接并观看</button>
   <button id="disconnect" class="ghost">断开</button>
   <button id="fullscreen" class="ghost">全屏</button>
+  <button id="control" class="ghost warn" disabled>申请控制<span class="exp-tag">实验</span></button>
 </div>
 
 <div class="stage">
@@ -99,6 +167,13 @@
     <canvas id="h264"></canvas>
     <img id="frame" alt="" style="display:none" />
     <div class="fs-hint" id="fsHint">点击画面或按 Esc 退出全屏</div>
+    <div class="ctrl-bar" id="ctrlBar">
+      <span class="ctrl-tag">控制中</span>
+      <button data-key="back">返回</button>
+      <button data-key="home">主页</button>
+      <button data-key="recents">最近</button>
+      <button id="ctrlExit" class="danger">退出控制</button>
+    </div>
   </div>
 </div>
 
@@ -108,11 +183,50 @@
   <span>数据量 <b id="mBytes">0</b> KB</span>
   <span>码率 <b id="mKbps">0</b> kbps</span>
   <span>分辨率 <b id="mRes">-</b></span>
+  <span>编码 <b id="mCodec">-</b></span>
   <span>音频 <b id="mAudio">0</b> 帧</span>
 </div>
 
 <div class="foot">
   <a href="/download/StreamCast.apk" download="StreamCast.apk">下载 App 版接收端（APK）</a>
+  <a href="/disclaimer.html" target="_blank" rel="noopener">实验性功能免责声明</a>
+</div>
+
+<!-- ================= 免责声明弹窗（首次开启实验性功能） ================= -->
+<div class="modal-mask" id="expMask">
+  <div class="modal">
+    <div class="modal-head">实验性功能免责声明 <small>v1.0</small></div>
+    <div class="modal-body" id="expBody">
+      <h3>一、实验性功能的性质</h3>
+      <p>H.265（HEVC）传输与远程控制均属实验性功能，按「现状」提供，可能不稳定、可能在某些设备上不可用，也可能随时调整或下线，不承诺可用性。</p>
+      <h3>二、远程控制的真实风险</h3>
+      <p>主播点击「通过」后，你可以在授权期间<strong>操作对方手机的整机界面</strong>（点击、滑动、返回、主页）。对方设备上的聊天记录、相册、支付类应用都可能被看到或误操作。授权范围是整机，不存在「只操作某个应用」的隔离。</p>
+      <h3>三、你的承诺</h3>
+      <ul>
+        <li>只控制<strong>你本人拥有，或已取得设备所有人明确授权</strong>的设备；</li>
+        <li>仅用于设备协助、远程演示、售后支持等正当目的；</li>
+        <li>不用于窥探隐私、窃取数据、操作他人账户、诈骗或其他违法活动；</li>
+        <li>不使用欺骗、诱导方式使他人授权。</li>
+      </ul>
+      <p><strong>未经授权控制他人设备，可能构成非法侵入计算机信息系统、侵犯公民个人信息等违法行为，情节严重的将承担刑事责任。</strong></p>
+      <h3>四、能力边界与失效</h3>
+      <p>同一房间同一时刻仅一名控制者；单次控制最长 30 分钟；主播可随时点击「退出控制」立即收回；你退出、断线或直播结束时授权立即失效。</p>
+      <h3>五、数据处理</h3>
+      <p>控制指令经服务器实时转发，服务端不存储手势内容与画面。为安全审计，会记录房间号、申请方昵称及申请/批准/拒绝/结束的时间与结果。</p>
+      <h3>六、责任</h3>
+      <p>使用实验性功能的全部风险与后果由你自行承担。因功能不稳定、失效、误操作或被滥用导致的损失，我们在法律允许的最大范围内不承担责任；你违反上述承诺的，独立承担全部法律责任。</p>
+      <p>本声明为《用户协议》的组成部分，完整版本见 <a href="/disclaimer.html" target="_blank" rel="noopener" style="color:var(--accent)">/disclaimer.html</a>。</p>
+    </div>
+    <div class="modal-scroll-tip" id="expTip">请向下滚动阅读至末尾</div>
+    <label class="modal-check disabled" id="expCheckWrap">
+      <input type="checkbox" id="expAck" disabled />
+      <span>我已完整阅读并同意上述声明，且知晓远程控制的真实风险</span>
+    </label>
+    <div class="modal-foot">
+      <button class="ghost" id="expCancel">取消</button>
+      <button id="expOk" disabled>同意并申请控制</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -121,7 +235,16 @@
   const wsProto = location.protocol === 'https:' ? 'wss://' : 'ws://';
   let ws = null, frames = 0, bytes = 0, fpsTimer = null, lastFpsFrames = 0, lastBytes = 0, urlQueue = [];
 
-  // 从地址栏取房间号
+  /** 实验性功能免责声明版本：与 /disclaimer.html、App 内文案保持一致 */
+  const EXP_VERSION = '1.0';
+  const EXP_KEY = 'spl_exp_ack';
+
+  let myCid = '';
+  let myName = localStorage.getItem('spl_nick') || '网页观众';
+  /** idle | pending | active | denied */
+  let controlState = 'idle';
+  let controllerName = '';
+
   const params = new URLSearchParams(location.search);
   if (params.get('room')) $('room').value = params.get('room');
   const autoConnect = params.get('auto') === '1';
@@ -131,6 +254,7 @@
     $('dot').className = 'dot' + (cls ? ' ' + cls : '');
   }
 
+  // ---------------------------------------------------------------- 连接
   function connect() {
     const room = $('room').value.trim();
     if (!room) { alert('请输入房间号'); return; }
@@ -140,69 +264,23 @@
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'join', room, role: 'receiver', name: 'web' }));
+      ws.send(JSON.stringify({ type: 'join', room, role: 'receiver', name: myName }));
     };
     ws.onmessage = (ev) => {
       if (typeof ev.data === 'string') {
         let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
-        if (m.type === 'joined') {
-          setStatus('已加入房间 ' + m.room + '，等待画面…', 'wait');
-        } else if (m.type === 'meta') {
-          $('mRes').textContent = m.width + '×' + m.height;
-          if (m.fps) vFps = m.fps;
-          setStatus('直播中 · 房间 ' + room, 'on');
-        } else if (m.type === 'peer-joined') {
-          if (m.role === 'sender') setStatus('发送端已接入，等待画面…', 'wait');
-        } else if (m.type === 'peer-left') {
-          if (m.role === 'sender') setStatus('发送端已断开', 'err');
-        } else if (m.type === 'error') {
-          setStatus(m.message, 'err');
-        }
+        handleControlMessage(m, room);
         return;
       }
-      // 二进制帧：首字节 0x02 音频 / 0x03 H.264 / 0x04 编解码配置 / 其余为裸 JPEG
-      const view = new Uint8Array(ev.data);
-      if (view[0] === 2) {
-        playAudio(view.subarray(1));
-        return;
-      }
-      if (view[0] === 4) {
-        configureFromFrame(view.subarray(1));
-        return;
-      }
-      if (view[0] === 5) {
-        // 发送端丢弃了积压：关闭解码器，只等下一个带 SPS 的关键帧重建，直接跳到直播边缘
-        if (vDecoder) {
-          try { vDecoder.close(); } catch (e) {}
-        }
-        vDecoder = null;
-        vConfigured = false;
-        return;
-      }
-      if (view[0] === 3) {
-        bytes += ev.data.byteLength;
-        playH264(view.subarray(1));
-        return;
-      }
-
-      const blob = new Blob([ev.data], { type: 'image/jpeg' });
-      const url = URL.createObjectURL(blob);
-      urlQueue.push(url);
-      frames++; bytes += ev.data.byteLength;
-      const img = $('frame');
-      img.onload = () => {
-        while (urlQueue.length > 1) URL.revokeObjectURL(urlQueue.shift());
-      };
-      img.src = url;
-      img.style.display = 'block';
-      $('placeholder').style.display = 'none';
-      setStatus('直播中', 'on');
-      updateMetrics();
+      handleBinary(ev.data);
     };
     ws.onerror = () => setStatus('连接出错', 'err');
     ws.onclose = () => {
       setStatus('已断开', '');
       if (fpsTimer) { clearInterval(fpsTimer); fpsTimer = null; }
+      exitControlMode(false);
+      controlState = 'idle';
+      updateControlButton();
     };
 
     if (fpsTimer) clearInterval(fpsTimer);
@@ -213,6 +291,108 @@
       $('mFps').textContent = df;
       $('mKbps').textContent = Math.round((db * 8) / 1000);
     }, 1000);
+    updateMetrics();
+    updateControlButton();
+  }
+
+  function handleControlMessage(m, room) {
+    switch (m.type) {
+      case 'joined':
+        myCid = m.cid || '';
+        setStatus('已加入房间 ' + m.room + '，等待画面…', 'wait');
+        if (m.control && m.control.active) {
+          controllerName = m.control.name || '其他观众';
+          controlState = 'idle';
+        }
+        updateControlButton();
+        break;
+      case 'meta':
+        $('mRes').textContent = m.width + '×' + m.height;
+        if (m.codec) $('mCodec').textContent = m.codec === 'hevc' ? 'H.265' : m.codec === 'jpeg' ? 'JPEG' : 'H.264';
+        if (m.fps) vFps = m.fps;
+        setStatus('直播中 · 房间 ' + room, 'on');
+        break;
+      case 'peer-joined':
+        if (m.role === 'sender') setStatus('发送端已接入，等待画面…', 'wait');
+        break;
+      case 'peer-left':
+        if (m.role === 'sender') {
+          setStatus('发送端已断开', 'err');
+          exitControlMode(false);
+          controlState = 'idle';
+          updateControlButton();
+        }
+        break;
+      case 'error':
+        setStatus(m.message, 'err');
+        break;
+
+      // ---------------- 远程控制 ----------------
+      case 'control-pending':
+        controlState = 'pending';
+        updateControlButton();
+        setStatus('控制申请已发送，等待主播确认…', 'wait');
+        break;
+      case 'control-granted':
+        controlState = 'active';
+        controllerName = myName;
+        enterControlMode();
+        setStatus('已获得控制权 · 点按/滑动画面即可操作对方手机', 'on');
+        break;
+      case 'control-denied':
+        controlState = 'idle';
+        updateControlButton();
+        alert(m.reason || '主播拒绝了控制申请');
+        setStatus('控制申请未通过', 'err');
+        break;
+      case 'control-end':
+        if (controlState === 'active') {
+          exitControlMode(false);
+          controlState = 'idle';
+          updateControlButton();
+          setStatus('控制已结束：' + (m.reason || '主播收回了控制权'), 'wait');
+        }
+        break;
+      case 'control-state':
+        if (m.active) {
+          controllerName = m.name || '其他观众';
+          if (controlState !== 'active') controlState = 'idle';
+        } else {
+          if (controlState !== 'active') controllerName = '';
+        }
+        updateControlButton();
+        break;
+    }
+  }
+
+  function handleBinary(buf) {
+    const view = new Uint8Array(buf);
+    const b = view[0];
+    if (b === 2) { playAudio(view.subarray(1)); return; }
+    if (b === 4) { configureFromFrame('h264', view.subarray(1)); return; }
+    if (b === 7) { configureFromFrame('hevc', view.subarray(1)); return; }
+    if (b === 5) {
+      // 发送端丢弃了积压：关闭解码器，只等下一个关键帧重建，直接跳到直播边缘
+      if (vDecoder) { try { vDecoder.close(); } catch (e) {} }
+      vDecoder = null; vConfigured = false; vNeedKey = true;
+      return;
+    }
+    if (b === 3) { bytes += buf.byteLength; playVideo('h264', view.subarray(1)); return; }
+    if (b === 6) { bytes += buf.byteLength; playVideo('hevc', view.subarray(1)); return; }
+
+    const blob = new Blob([buf], { type: 'image/jpeg' });
+    const url = URL.createObjectURL(blob);
+    urlQueue.push(url);
+    frames++; bytes += buf.byteLength;
+    const img = $('frame');
+    img.onload = () => {
+      while (urlQueue.length > 1) URL.revokeObjectURL(urlQueue.shift());
+    };
+    img.src = url;
+    img.style.display = 'block';
+    $('placeholder').style.display = 'none';
+    $('mCodec').textContent = 'JPEG';
+    setStatus('直播中', 'on');
     updateMetrics();
   }
 
@@ -226,21 +406,241 @@
     if (fpsTimer) { clearInterval(fpsTimer); fpsTimer = null; }
     teardownAudio();
     teardownVideo();
+    exitControlMode(false);
+    controlState = 'idle';
+    myCid = '';
+    controllerName = '';
+    updateControlButton();
     frames = 0; bytes = 0; lastFpsFrames = 0; lastBytes = 0;
     updateMetrics();
     $('frame').style.display = 'none';
     $('placeholder').style.display = 'block';
+    $('mCodec').textContent = '-';
     setStatus('未连接', '');
   }
 
-  // ---------------- H.264 视频（WebCodecs 硬件解码） ----------------
+  // ---------------------------------------------------------------- 远程控制
+  function updateControlButton() {
+    const btn = $('control');
+    if (!ws || ws.readyState !== 1) {
+      btn.textContent = '申请控制';
+      btn.disabled = true;
+      return;
+    }
+    if (controlState === 'active') {
+      btn.textContent = '退出控制';
+      btn.disabled = false;
+      btn.className = 'danger';
+      return;
+    }
+    btn.className = 'ghost warn';
+    if (controlState === 'pending') {
+      btn.textContent = '等待主播确认…';
+      btn.disabled = true;
+    } else if (controllerName) {
+      btn.textContent = controllerName + ' 正在控制';
+      btn.disabled = true;
+    } else {
+      btn.innerHTML = '申请控制<span class="exp-tag">实验</span>';
+      btn.disabled = false;
+    }
+  }
+
+  function enterControlMode() {
+    document.querySelector('.screen').classList.add('ctl');
+    $('ctrlBar').classList.add('on');
+    updateControlButton();
+  }
+
+  function exitControlMode(notify) {
+    document.querySelector('.screen').classList.remove('ctl');
+    $('ctrlBar').classList.remove('on');
+    down = null;
+    if (notify && ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'control-end' }));
+    }
+    updateControlButton();
+  }
+
+  /** 首次开启实验性功能前必须完成的强制阅读 */
+  function requireDisclaimer(done) {
+    if (localStorage.getItem(EXP_KEY) === EXP_VERSION) { done(); return; }
+    const mask = $('expMask');
+    const body = $('expBody');
+    const ack = $('expAck');
+    const ok = $('expOk');
+    const tip = $('expTip');
+    const wrap = $('expCheckWrap');
+
+    ack.checked = false;
+    ack.disabled = true;
+    ok.disabled = true;
+    wrap.classList.add('disabled');
+    mask.classList.add('on');
+    body.scrollTop = 0;
+    tip.style.display = 'block';
+
+    const onScroll = () => {
+      const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 24;
+      if (atBottom) {
+        ack.disabled = false;
+        wrap.classList.remove('disabled');
+        tip.style.display = 'none';
+        body.removeEventListener('scroll', onScroll);
+      }
+    };
+    body.addEventListener('scroll', onScroll);
+    // 内容未超出可视区（大屏）时直接允许勾选
+    setTimeout(() => {
+      if (body.scrollHeight <= body.clientHeight + 4) onScroll();
+    }, 60);
+
+    const close = () => {
+      mask.classList.remove('on');
+      ack.onchange = null; ok.onclick = null;
+      $('expCancel').onclick = null;
+    };
+    ack.onchange = () => { ok.disabled = !ack.checked; };
+    $('expCancel').onclick = close;
+    ok.onclick = () => {
+      if (!ack.checked) return;
+      localStorage.setItem(EXP_KEY, EXP_VERSION);
+      close();
+      done();
+    };
+  }
+
+  function requestControl() {
+    if (!ws || ws.readyState !== 1) { alert('请先连接房间'); return; }
+    if (controlState === 'active') {
+      exitControlMode(true);
+      controlState = 'idle';
+      setStatus('已退出控制', 'wait');
+      updateControlButton();
+      return;
+    }
+    requireDisclaimer(() => {
+      ws.send(JSON.stringify({ type: 'control-request' }));
+      controlState = 'pending';
+      updateControlButton();
+      setStatus('控制申请已发送，等待主播确认…', 'wait');
+    });
+  }
+
+  // ---- 手势采集：坐标归一化到视频内容区，发送端按屏幕尺寸还原 ----
+  const screenEl = document.querySelector('.screen');
+  let down = null;
+
+  function videoEl() {
+    const c = $('h264');
+    if (c.style.display !== 'none') return c;
+    const f = $('frame');
+    if (f.style.display !== 'none') return f;
+    return null;
+  }
+
+  /** 画面真实内容矩形（img 使用 object-fit:contain 时需扣掉黑边） */
+  function contentRect() {
+    const el = videoEl();
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    if (el.tagName === 'IMG') {
+      const nw = el.naturalWidth, nh = el.naturalHeight;
+      if (nw > 0 && nh > 0) {
+        const scale = Math.min(r.width / nw, r.height / nh);
+        const w = nw * scale, h = nh * scale;
+        return { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h };
+      }
+    }
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  }
+
+  function norm(e, rect) {
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+    };
+  }
+
+  function sendInput(obj) {
+    if (controlState !== 'active' || !ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify(Object.assign({ type: 'control-input' }, obj)));
+  }
+
+  screenEl.addEventListener('pointerdown', (e) => {
+    if (controlState !== 'active') return;
+    // 控制工具条上的操作不能被当成画面手势（否则点「返回」会先触发一次点击）
+    if (e.target && e.target.closest && e.target.closest('.ctrl-bar')) return;
+    const rect = contentRect();
+    if (!rect) return;
+    const p = norm(e, rect);
+    down = { x: p.x, y: p.y, t: Date.now(), id: e.pointerId, moved: false };
+    try { screenEl.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  }, { passive: false });
+
+  screenEl.addEventListener('pointermove', (e) => {
+    if (!down || e.pointerId !== down.id) return;
+    const rect = contentRect();
+    if (!rect) return;
+    const p = norm(e, rect);
+    if (Math.abs(p.x - down.x) > 0.012 || Math.abs(p.y - down.y) > 0.012) down.moved = true;
+    e.preventDefault();
+  }, { passive: false });
+
+  screenEl.addEventListener('pointerup', (e) => {
+    if (!down || e.pointerId !== down.id) return;
+    const rect = contentRect();
+    if (!rect) { down = null; return; }
+    const p = norm(e, rect);
+    const dt = Date.now() - down.t;
+    const dx = Math.abs(p.x - down.x);
+    const dy = Math.abs(p.y - down.y);
+
+    if (!down.moved && dt < 320 && dx < 0.012 && dy < 0.012) {
+      sendInput({ action: 'tap', x: p.x, y: p.y });
+    } else if (dx > 0.008 || dy > 0.008) {
+      sendInput({
+        action: 'swipe',
+        x: down.x, y: down.y, x2: p.x, y2: p.y,
+        duration: Math.min(1200, Math.max(80, dt)),
+      });
+    }
+    down = null;
+    e.preventDefault();
+  }, { passive: false });
+
+  screenEl.addEventListener('pointercancel', () => { down = null; });
+
+  $('ctrlBar').addEventListener('click', (e) => {
+    const key = e.target.getAttribute && e.target.getAttribute('data-key');
+    if (key) { sendInput({ action: 'key', key }); }
+  });
+  $('ctrlExit').onclick = () => {
+    exitControlMode(true);
+    controlState = 'idle';
+    setStatus('已退出控制', 'wait');
+    updateControlButton();
+  };
+  $('control').onclick = (e) => { e.stopPropagation(); requestControl(); };
+
+  // ---------------------------------------------------------------- 视频解码
   const vCanvas = document.getElementById('h264');
   let vCtx = null;
   let vDecoder = null;
   let vConfigured = false;
-  let vFailed = false;
+  let vCodec = null;
+  let vNeedKey = true;
+  let vFailedKind = null;
   let vPts = 0;
   let vFps = 15;
+
+  const HEVC_CANDIDATES = [
+    'hvc1.1.6.L120.B0', 'hvc1.1.6.L93.B0', 'hvc1.1.6.L90.B0',
+    'hev1.1.6.L120.B0', 'hev1.1.6.L93.B0', 'hev1.1.6.L90.B0',
+    'hvc1.2.4.L120.B0', 'hev1.2.4.L120.B0',
+  ];
 
   function nalStarts(u8) {
     const starts = [];
@@ -253,74 +653,143 @@
     return starts;
   }
 
-  /** 从码流里找 SPS，拼出 codec 字符串并配置解码器（关键帧与 0x04 配置帧都带 SPS） */
-  function configureFromFrame(u8) {
-    if (vConfigured || vFailed) return vConfigured;
+  function avcIsKey(au) {
+    for (const s of nalStarts(au)) {
+      const t = au[s] & 0x1f;
+      if (t === 7 || t === 5) return true;
+    }
+    return false;
+  }
+
+  function hevcIsKey(au) {
+    for (const s of nalStarts(au)) {
+      const t = (au[s] >> 1) & 0x3f;
+      // 16..23：BLA / IDR / CRA，均可作为随机接入点
+      if (t >= 16 && t <= 23) return true;
+    }
+    return false;
+  }
+
+  function decoderInit() {
+    return {
+      output: (frame) => {
+        try {
+          if (vCanvas.width !== frame.displayWidth || vCanvas.height !== frame.displayHeight) {
+            vCanvas.width = frame.displayWidth;
+            vCanvas.height = frame.displayHeight;
+          }
+          vCtx = vCtx || vCanvas.getContext('2d', { alpha: false });
+          vCtx.drawImage(frame, 0, 0);
+          vCanvas.style.display = 'block';
+          $('frame').style.display = 'none';
+          $('placeholder').style.display = 'none';
+          frames++;
+          updateMetrics();
+        } catch (e) {
+          // 忽略
+        } finally {
+          try { frame.close(); } catch (e) {}
+        }
+      },
+      error: () => { vFailedKind = vCodec; vDecoder = null; vConfigured = false; }
+    };
+  }
+
+  function closeDecoder() {
+    if (vDecoder) { try { vDecoder.close(); } catch (e) {} }
+    vDecoder = null;
+    vConfigured = false;
+  }
+
+  /** H.264：从 SPS 前三字节拼出 avc1.xxxxxx */
+  function avcCodecString(bytes) {
+    for (const s of nalStarts(bytes)) {
+      if ((bytes[s] & 0x1f) === 7 && s + 3 < bytes.length) {
+        const hex = (n) => n.toString(16).padStart(2, '0');
+        return 'avc1.' + hex(bytes[s + 1]) + hex(bytes[s + 2]) + hex(bytes[s + 3]);
+      }
+      }
+    return null;
+  }
+
+  /** H.265：浏览器对 HEVC 的 codec 字符串支持差异较大，逐个试配 */
+  function makeHevcDecoder() {
+    if (typeof VideoDecoder === 'undefined') return null;
+    for (const codec of HEVC_CANDIDATES) {
+      let d = null;
+      try {
+        d = new VideoDecoder(decoderInit());
+        d.configure({ codec, hevc: { format: 'annexb' }, optimizeForLatency: true });
+        return d;
+      } catch (e) {
+        try { if (d) d.close(); } catch (e2) {}
+      }
+    }
+    return null;
+  }
+
+  function ensureVideoDecoder(kind, bytes) {
+    if (vDecoder && vConfigured && vCodec === kind) return true;
+    if (vFailedKind === kind) return false;
     if (typeof VideoDecoder === 'undefined') {
-      vFailed = true;
-      setStatus('当前浏览器不支持 H.264 解码，请用 App 接收端', 'wait');
+      vFailedKind = kind;
+      setStatus('当前浏览器不支持 ' + (kind === 'hevc' ? 'H.265' : 'H.264') + ' 解码，请用 App 接收端', 'wait');
       return false;
     }
-    let sps = -1;
-    for (const s of nalStarts(u8)) {
-      if ((u8[s] & 0x1f) === 7) { sps = s; break; }
-    }
-    if (sps < 0 || sps + 3 >= u8.length) return false;
 
-    const hex = (n) => n.toString(16).padStart(2, '0');
-    const codec = 'avc1.' + hex(u8[sps + 1]) + hex(u8[sps + 2]) + hex(u8[sps + 3]);
+    closeDecoder();
+    vCodec = kind;
+    vCtx = vCanvas.getContext('2d', { alpha: false });
 
     try {
-      if (vDecoder) { try { vDecoder.close(); } catch (e) {} }
-      vCtx = vCanvas.getContext('2d', { alpha: false });
-      vDecoder = new VideoDecoder({
-        output: (frame) => {
-          try {
-            if (vCanvas.width !== frame.displayWidth || vCanvas.height !== frame.displayHeight) {
-              vCanvas.width = frame.displayWidth;
-              vCanvas.height = frame.displayHeight;
-            }
-            vCtx.drawImage(frame, 0, 0);
-            vCanvas.style.display = 'block';
-            $('frame').style.display = 'none';
-            $('placeholder').style.display = 'none';
-            frames++;
-            updateMetrics();
-          } catch (e) {
-            // 忽略
-          } finally {
-            try { frame.close(); } catch (e) {}
-          }
-        },
-        error: () => { vFailed = true; }
-      });
-      // annexb：SPS/PPS 内联在码流里，无需额外 description
-      vDecoder.configure({
-        codec: codec,
-        avc: { format: 'annexb' },
-        optimizeForLatency: true
-      });
+      if (kind === 'hevc') {
+        const d = makeHevcDecoder();
+        if (!d) {
+          vFailedKind = 'hevc';
+          vCodec = null;
+          setStatus('当前浏览器不支持 H.265 解码：请用 App 接收端观看，或请主播切回 H.264', 'wait');
+          return false;
+        }
+        vDecoder = d;
+      } else {
+        const codec = avcCodecString(bytes) || 'avc1.42E01E';
+        vDecoder = new VideoDecoder(decoderInit());
+        vDecoder.configure({ codec, avc: { format: 'annexb' }, optimizeForLatency: true });
+      }
       vConfigured = true;
-      setStatus('直播中 · H.264', 'on');
+      vNeedKey = true;
+      $('mCodec').textContent = kind === 'hevc' ? 'H.265' : 'H.264';
+      setStatus('直播中 · ' + (kind === 'hevc' ? 'H.265' : 'H.264'), 'on');
       return true;
     } catch (e) {
-      vFailed = true;
-      vConfigured = false;
-      setStatus('H.264 解码器初始化失败', 'wait');
+      vFailedKind = kind;
+      closeDecoder();
+      vCodec = null;
+      setStatus(kind === 'hevc' ? 'H.265 解码器初始化失败，请用 App 接收端' : 'H.264 解码器初始化失败', 'wait');
       return false;
     }
   }
 
-  function playH264(au) {
-    if (vFailed) return;
-    if (!vConfigured && !configureFromFrame(au)) return;
+  /** 0x04 / 0x07：宽(2) + 高(2) + 参数集 */
+  function configureFromFrame(kind, payload) {
+    if (payload.length < 5) return;
+    const w = (payload[0] << 8) | payload[1];
+    const h = (payload[2] << 8) | payload[3];
+    if (w > 0 && h > 0) { $('mRes').textContent = w + '×' + h; }
+    const csd = payload.subarray(4);
+    // 配置帧本身带参数集，可直接用于初始化
+    if (vCodec !== kind || !vConfigured) ensureVideoDecoder(kind, csd);
+  }
+
+  function playVideo(kind, au) {
+    if (vFailedKind === kind) return;
+    if (!ensureVideoDecoder(kind, au)) return;
     if (!vDecoder) return;
+    const isKey = kind === 'hevc' ? hevcIsKey(au) : avcIsKey(au);
+    // 解码器刚建立时必须等一个关键帧，否则会连续报错
+    if (vNeedKey && !isKey) return;
+    if (isKey) vNeedKey = false;
     try {
-      let isKey = false;
-      for (const s of nalStarts(au)) {
-        const t = au[s] & 0x1f;
-        if (t === 7 || t === 5) { isKey = true; break; }
-      }
       vPts += Math.round(1e6 / (vFps || 15));
       vDecoder.decode(new EncodedVideoChunk({
         type: isKey ? 'key' : 'delta',
@@ -328,19 +797,18 @@
         data: au
       }));
     } catch (e) {
-      // 忽略单帧异常
+      // 单帧异常不影响后续（可能是解码器正在重建）
     }
   }
 
   function teardownVideo() {
-    if (vDecoder) {
-      try { vDecoder.close(); } catch (e) {}
-      vDecoder = null;
-    }
-    vConfigured = false;
-    vFailed = false;
+    closeDecoder();
+    vCodec = null;
+    vFailedKind = null;
+    vNeedKey = true;
     vPts = 0;
     vCanvas.style.display = 'none';
+    $('mCodec').textContent = '-';
   }
 
   // ---------------- 设备音频播放（WebCodecs，属增强能力） ----------------
@@ -352,9 +820,8 @@
   let nextPlayTime = 0;
   let audioFailed = false;
 
-  /** 解析 ADTS 头，还原采样率/声道，并生成 2 字节 AudioSpecificConfig */
   function parseAdts(u8) {
-    const profile = (u8[2] >> 6) & 0x03;      // AudioObjectType - 1
+    const profile = (u8[2] >> 6) & 0x03;
     const sfIndex = (u8[2] >> 2) & 0x0F;
     const channels = ((u8[2] & 0x01) << 2) | ((u8[3] >> 6) & 0x03);
     const aot = profile + 1;
@@ -381,30 +848,26 @@
         output: (data) => {
           try {
             const ch = data.numberOfChannels;
-            const frames = data.numberOfFrames;
-            const buffer = audioCtx.createBuffer(ch, frames, data.sampleRate);
+            const frames2 = data.numberOfFrames;
+            const buffer = audioCtx.createBuffer(ch, frames2, data.sampleRate);
             for (let c = 0; c < ch; c++) {
-              const arr = new Float32Array(frames);
+              const arr = new Float32Array(frames2);
               data.copyTo(arr, { planeIndex: c, format: 'f32-planar' });
               buffer.copyToChannel(arr, c);
             }
             const src = audioCtx.createBufferSource();
             src.buffer = buffer;
             src.connect(audioCtx.destination);
-            // 顺序排期，避免帧间空隙造成断续
             const startAt = Math.max(audioCtx.currentTime, nextPlayTime);
             src.start(startAt);
-            nextPlayTime = startAt + frames / data.sampleRate;
+            nextPlayTime = startAt + frames2 / data.sampleRate;
           } catch (e) {
             // 单帧失败忽略
           } finally {
             try { data.close(); } catch (e) {}
           }
         },
-        error: () => {
-          audioFailed = true;
-          audioDecoder = null;
-        }
+        error: () => { audioFailed = true; audioDecoder = null; }
       });
       audioDecoder.configure({
         codec: 'mp4a.40.2',
@@ -426,7 +889,6 @@
     const decoder = ensureAudioDecoder(head);
     if (!decoder) return;
     try {
-      // 去掉 7 字节 ADTS 头，解码器只接受裸 AAC 数据
       decoder.decode(new EncodedAudioChunk({
         type: 'key',
         timestamp: Math.round(audioFrames * 1024 * 1e6 / head.sampleRate),
@@ -441,22 +903,15 @@
   }
 
   function teardownAudio() {
-    if (audioDecoder) {
-      try { audioDecoder.close(); } catch (e) {}
-      audioDecoder = null;
-    }
-    if (audioCtx) {
-      try { audioCtx.close(); } catch (e) {}
-      audioCtx = null;
-    }
+    if (audioDecoder) { try { audioDecoder.close(); } catch (e) {} audioDecoder = null; }
+    if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
     audioFrames = 0;
     nextPlayTime = 0;
     audioFailed = false;
     $('mAudio').textContent = '0';
   }
 
-  // ---------------- 全屏观看 ----------------
-  const screenEl = document.querySelector('.screen');
+  // ---------------------------------------------------------------- 全屏观看
   let hintTimer = null;
 
   function nativeFsEl() {
@@ -473,7 +928,6 @@
       hintTimer = setTimeout(() => $('fsHint').classList.add('hide'), 3500);
     }
   }
-  // 降级方案：iOS Safari 等不支持对任意元素调用原生全屏时，用固定定位铺满整屏
   function setPseudo(on) {
     screenEl.classList.toggle('pseudo-fs', on);
     document.body.classList.toggle('fs-lock', on);
@@ -503,7 +957,11 @@
 
   document.addEventListener('fullscreenchange', updateFsButton);
   document.addEventListener('webkitfullscreenchange', updateFsButton);
-  screenEl.addEventListener('click', toggleFullscreen);
+  screenEl.addEventListener('click', () => {
+    // 控制模式下点击画面用于操作被控设备，不能触发全屏切换
+    if (controlState === 'active') return;
+    toggleFullscreen();
+  });
   $('fullscreen').onclick = (e) => { e.stopPropagation(); toggleFullscreen(); };
   $('fsHint').classList.add('hide');
 
@@ -511,7 +969,14 @@
   $('disconnect').onclick = disconnect;
   $('room').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
 
-  // ?auto=1 时打开即连（方便直接把链接发给别人观看）
+  // 昵称：登录用户优先用昵称（控制申请时主播能看到是谁）
+  if (window.SC && SC.token && SC.token()) {
+    SC.api('/api/auth/me').then((d) => {
+      const n = (d.user && (d.user.nickname || (d.user.email || '').split('@')[0])) || '';
+      if (n) { myName = n; localStorage.setItem('spl_nick', n); }
+    }).catch(() => {});
+  }
+
   if (autoConnect && $('room').value.trim()) connect();
 })();
 </script>

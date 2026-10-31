@@ -17,4 +17,16 @@
     <string name="label_quality">画质</string>
     <string name="perm_granted">已授权</string>
     <string name="perm_denied">未授权</string>
+
+    <!-- 实验性功能 · 远程控制（无障碍服务） -->
+    <string name="accessibility_desc">仅在直播中、且主播明确授权后，执行观看端发来的点击与滑动操作。本服务不读取屏幕内容，不收集任何界面信息。</string>
+    <string name="accessibility_summary">远程控制用：只执行点击/滑动/返回手势，不读屏</string>
+    <string name="exp_title">实验性功能</string>
+    <string name="exp_badge">实验</string>
+    <string name="h265_label">H.265 编码</string>
+    <string name="remote_control_label">远程控制</string>
+    <string name="control_request_title">远程控制申请</string>
+    <string name="control_allow">通过</string>
+    <string name="control_deny">拒绝</string>
+    <string name="control_exit">退出控制</string>
 </resources>
