@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>服务维护中 · 流式频传输平台</title>
+<link rel="icon" href="data:," />
+<style>
+  :root {
+    --bg: #f6f8fb; --card: #ffffff; --line: #e3e8f0; --text: #101828;
+    --muted: #667085; --accent: #2f6bf7; --warn: #b45309; --warn-bg: #fff7e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0e14; --card: #141a24; --line: #232c3b; --text: #e6edf6;
+      --muted: #8b98ab; --accent: #2f81f7; --warn: #d29922; --warn-bg: #241d0c;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .wrap { width: 100%; max-width: 460px; text-align: center; }
+  .brand {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--muted); letter-spacing: .3px; margin-bottom: 26px;
+  }
+  .brand i {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--warn);
+    box-shadow: 0 0 0 0 rgba(210, 153, 34, .5); animation: ring 2.2s infinite;
+  }
+  @keyframes ring {
+    0% { box-shadow: 0 0 0 0 rgba(210, 153, 34, .45); }
+    70% { box-shadow: 0 0 0 9px rgba(210, 153, 34, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(210, 153, 34, 0); }
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    padding: 38px 26px 30px; box-shadow: 0 20px 50px rgba(16, 24, 40, .08);
+  }
+  .icon { width: 46px; height: 46px; margin: 0 auto 14px; color: var(--warn); }
+  .icon svg { width: 100%; height: 100%; display: block; }
+  h1 { font-size: 24px; margin: 0 0 10px; letter-spacing: .5px; }
+  p { font-size: 14px; line-height: 1.85; color: var(--muted); margin: 0; }
+  .note {
+    margin-top: 20px; padding: 12px 14px; border-radius: 10px; text-align: left;
+    background: var(--warn-bg); border: 1px solid rgba(180, 120, 20, .25);
+    border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent);
+    color: var(--muted); font-size: 13px; line-height: 1.75;
+  }
+  .note b { color: var(--warn); font-weight: 600; }
+  .foot { margin-top: 22px; font-size: 12px; color: var(--muted); }
+  .foot span { color: var(--text); font-variant-numeric: tabular-nums; }
+  .bar { margin-top: 18px; height: 3px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .bar i {
+    display: block; height: 100%; width: 40%; border-radius: 3px; background: var(--accent);
+    animation: slide 1.8s ease-in-out infinite;
+  }
+  @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><i></i>流式频传输平台</div>
+  <div class="card">
+    <div class="icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+      </svg>
+    </div>
+    <h1>服务维护中</h1>
+    <p>系统正在进行临时维护升级，暂时无法访问。<br />请稍后再来，感谢你的耐心等待。</p>
+    <div class="note">
+      <b>维护期间</b>：网页接收端、App 连接与直播都会中断，已建立的连接将自动断开。维护结束后重新打开或刷新页面即可恢复。
+    </div>
+    <div class="bar"><i></i></div>
+    <div class="foot">页面将在 <span id="cd">30</span> 秒后自动重试</div>
+  </div>
+</div>
+<script>
+  (function () {
+    var left = 30, el = document.getElementById('cd');
+    setInterval(function () {
+      left -= 1;
+      if (left <= 0) { location.reload(); return; }
+      if (el) el.textContent = left;
+    }, 1000);
+  })();
+</script>
+</body>
+</html>

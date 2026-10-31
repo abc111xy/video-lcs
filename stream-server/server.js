@@ -404,10 +404,46 @@ async function handleAuth(p, req, res) {
   }
 }
 
+// ---------------------------------------------------------------- 维护模式
+// 存在该文件即视为维护中（运行期实时判断，删除文件后下个请求即恢复，无需重启）
+const MAINT_FLAG = path.join(__dirname, '.maintenance');
+function maintenanceOn() {
+  try { return fs.existsSync(MAINT_FLAG); } catch (e) { return false; }
+}
+
+function sendMaintenance(req, res, p) {
+  if (p.startsWith('/api/')) {
+    res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ error: '服务维护中，请稍后重试', maintenance: true, retryAfter: 300 }));
+    return;
+  }
+  fs.readFile(path.join(__dirname, 'public', 'maintenance.html'), (err, data) => {
+    const headers = {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Retry-After': '300',
+    };
+    if (!err) headers['Content-Length'] = data.length;
+    res.writeHead(503, headers);
+    res.end(err ? '<!doctype html><meta charset="utf-8"><h1>服务维护中</h1>' : data);
+  });
+}
+
 // ---------------------------------------------------------------- HTTP
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const p = url.pathname;
+
+  if (maintenanceOn()) {
+    // 探活仍需可用，否则平台会判定进程已死
+    if (p === '/health' || p === '/api/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: true, maintenance: true, service: 'stream-relay-server', uptime: process.uptime() }));
+      return;
+    }
+    sendMaintenance(req, res, p);
+    return;
+  }
 
   if (p === '/health' || p === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -473,7 +509,16 @@ server.on('connection', (socket) => {
 });
 
 // ---------------------------------------------------------------- WebSocket
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 * 1024 });
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  maxPayload: 16 * 1024 * 1024,
+  // 维护期间直接拒绝握手，客户端会立刻收到 503 而不是卡在重连
+  verifyClient: (info, cb) => {
+    if (maintenanceOn()) return cb(false, 503, 'Service under maintenance');
+    cb(true);
+  },
+});
 
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
