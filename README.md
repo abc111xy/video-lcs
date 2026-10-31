@@ -2,7 +2,7 @@
 
 把手机或电脑的画面实时传给任何人：**采集 → 中继 → 播放**。自带账号体系、用户中心、隐私房间与设备音频同步，并提供 H.265 传输与远程控制两项实验性能力。
 
-- **发送端**：Android App（屏幕+内录音频）、Windows / Linux 桌面端（摄像头或整屏）、网页（仅摄像头）、iOS 工程源码
+- **发送端**：Android App（摄像头 / 屏幕+内录音频）、Windows / Linux 桌面端（摄像头或整屏）、网页（仅摄像头）、iOS 工程源码
 - **接收端**：Android App、任意浏览器
 - **中继服务**：Node.js + WebSocket，房间式转发，可单机部署
 - **网页接收端**：打开链接即可观看，支持 H.264 / H.265 解码、全屏与亮/暗主题
@@ -134,6 +134,17 @@ cd streamcast-android
 echo "sdk.dir=/path/to/android-sdk" > local.properties
 ./gradlew assembleDebug
 ```
+
+两路开播入口，都在首屏：
+
+| 入口 | 实现 | 是否需要系统授权 |
+| --- | --- | --- |
+| **摄像头直播** | camera2 → YUV_420_888 → MediaCodec H.264 → WebSocket | 仅需相机权限 |
+| **屏幕直播** | MediaProjection → VirtualDisplay → 硬件 H.264 | 每次开播需确认录屏 + 浮窗权限 |
+
+摄像头直播单独跑 `CameraStreamService`（前台服务类型 `camera`），与屏幕直播共用同一套中继协议（`join` / `meta` / `0x03` 视频帧），
+因此网页端、桌面端、安卓接收端无需改动即可观看。预览与推流复用同一个相机会话（一次采集、两路输出），
+切前后镜头会重启采集、房间号不变，观众端 1~2 秒自动恢复画面。
 
 ### 桌面端（Windows / Linux）
 

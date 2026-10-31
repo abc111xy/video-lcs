@@ -20,7 +20,7 @@ const MAX_USES = 3;
 
 /** 平台清单：file 为 data/releases 下的实际文件名 */
 const PLATFORMS = {
-  android: { file: 'StreamCast-2.2.0.apk', name: 'StreamCast-Android-2.2.0.apk', label: 'Android', version: '2.2.0' },
+  android: { file: 'StreamCast-2.3.0.apk', name: 'StreamCast-Android-2.3.0.apk', label: 'Android', version: '2.3.0' },
   windows: { file: 'StreamCast-Windows-x64-1.0.0.zip', name: 'StreamCast-Windows-x64-1.0.0.zip', label: 'Windows', version: '1.0.0' },
   linux: { file: 'StreamCast-Linux-x86_64-1.0.0.AppImage', name: 'StreamCast-Linux-x86_64-1.0.0.AppImage', label: 'Linux', version: '1.0.0' },
   'ios-src': { file: 'StreamCast-iOS-src-1.0.0.zip', name: 'StreamCast-iOS-source-1.0.0.zip', label: 'iOS 源码', version: '1.0.0' },

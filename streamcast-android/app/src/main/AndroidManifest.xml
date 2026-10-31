@@ -17,6 +17,13 @@
     <!-- 设备音频内录（AudioPlaybackCapture 抓取系统播放声音，非麦克风） -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- 摄像头直播 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
+
     <!-- 我们并不采集麦克风，只是 AudioRecord 内录需要该权限；
          显式声明为非必需，避免无麦克风设备被应用商店过滤 -->
     <uses-feature
@@ -52,6 +59,12 @@
             android:launchMode="singleTop"
             android:screenOrientation="portrait" />
 
+        <!-- 直播预览 + 直播中控制：全屏、竖横屏都可用 -->
+        <activity
+            android:name=".LiveActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
         <activity
             android:name=".ReceiverActivity"
             android:exported="false"
@@ -62,6 +75,12 @@
             android:name=".StreamService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <!-- 摄像头直播：不需要录屏授权，单独一个前台服务 -->
+        <service
+            android:name=".CameraStreamService"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
 
         <!--
             远程控制（实验性功能）的 AccessibilityService。

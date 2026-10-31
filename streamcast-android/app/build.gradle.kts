@@ -11,8 +11,8 @@ android {
         applicationId = "com.streamcast.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
-        versionName = "2.2.0"
+        versionCode = 15
+        versionName = "2.3.0"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -51,6 +51,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 摄像头预览不引第三方库：camera2 + TextureView 已够用，且能省下约 1.5MB 体积
 
     testImplementation("junit:junit:4.13.2")
 }

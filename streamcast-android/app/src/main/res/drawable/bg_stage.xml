@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 摄像头预览舞台：固定深色底，保证任何主题下画面与浅色文字都清晰 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FF11151D" />
+    <corners android:radius="14dp" />
+</shape>

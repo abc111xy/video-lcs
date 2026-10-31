@@ -9,7 +9,8 @@
     <string name="room_hint">4 位数字</string>
     <string name="btn_overlay_perm">① 申请浮窗权限</string>
     <string name="btn_notify_perm">② 申请通知权限</string>
-    <string name="btn_start">③ 开始屏幕直播</string>
+    <string name="btn_start">开始屏幕直播</string>
+    <string name="btn_start_screen">屏幕直播（分享手机画面）</string>
     <string name="btn_stop">停止直播</string>
     <string name="btn_web">用浏览器观看</string>
     <string name="btn_to_receiver">进入接收端</string>

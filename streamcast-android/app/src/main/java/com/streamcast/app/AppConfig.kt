@@ -27,6 +27,9 @@ object AppConfig {
     const val KEY_EXP_ACK = "exp_ack"
     const val KEY_REMOTE_CONTROL = "remote_control"
 
+    const val KEY_FPS = "fps"
+    const val KEY_QUALITY = "quality"
+
     const val DEFAULT_FPS = 8
     const val MAX_FPS = 60
     const val DEFAULT_QUALITY = 50
@@ -67,6 +70,17 @@ object AppConfig {
     const val ENCODER_H264 = "h264"
     const val ENCODER_H265 = "h265"
     const val ENCODER_JPEG = "jpeg"
+
+    /** 直播来源：屏幕 / 摄像头 */
+    const val MODE_SCREEN = "screen"
+    const val MODE_CAMERA = "camera"
+    const val KEY_MODE = "live_mode"
+
+    /** 摄像头直播的分辨率预设：只开放常用的三档，避免一眼看不出差异 */
+    val CAMERA_PRESETS = listOf(480, 720, 1080)
+
+    /** 摄像头直播默认帧率（比屏幕直播更看重流畅度） */
+    const val DEFAULT_CAMERA_FPS = 20
 
     // ---------------------------------------------------------------- 实验性功能
     /** 免责声明版本：与 /disclaimer.html 保持一致，更新时旧同意自动失效 */

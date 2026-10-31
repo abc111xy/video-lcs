@@ -27,7 +27,9 @@ class RelayClient(
     private val privateRoom: Boolean = false,
     private val title: String = "",
     /** 昵称：主播端显示在浮窗，接收端用于「谁在申请控制」 */
-    private val displayName: String = ""
+    private val displayName: String = "",
+    /** 直播来源标记：screen / camera（仅发送端使用） */
+    private val mode: String = ""
 ) {
 
     interface Listener {
@@ -97,6 +99,8 @@ class RelayClient(
                 if (!token.isNullOrEmpty()) join.put("token", token)
                 if (role == "sender") {
                     join.put("private", privateRoom)
+                    // 直播来源：screen（屏幕）/ camera（摄像头），供网页端与大厅展示
+                    if (mode.isNotEmpty()) join.put("source", mode)
                     if (title.isNotBlank()) join.put("title", title)
                 }
                 webSocket.send(join.toString())

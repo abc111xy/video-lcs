@@ -1,75 +1,77 @@
 package com.streamcast.app
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.View
-import android.view.WindowManager
 import android.widget.SeekBar
-import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.streamcast.app.databinding.ActivityMainBinding
 
 /**
- * 发送端控制台：申请权限（浮窗 / 通知）→ 发起屏幕采集授权 → 启动直播服务。
+ * 首页：一屏内完成开播。
+ *
+ * 设计取舍：上一版把「连接配置 / 权限 / 参数 / 实验性功能 / 控制」五张卡片平铺，
+ * 首屏要滚两屏才能找到「开始」，很多用户以为没有摄像头直播。
+ * 现在改为：
+ *   - 首屏只有「房间号 + 两个开播按钮 + 状态」，其余全部收进「高级设置」；
+ *   - 摄像头直播成为主按钮（无需录屏授权，一步开播）；
+ *   - 屏幕直播保留为次按钮，参数沿用高级设置里的选择。
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private val prefs by lazy { getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE) }
 
-    private var resolutionPreset = AppConfig.DEFAULT_RESOLUTION
+    private var preset = AppConfig.DEFAULT_RESOLUTION
     private var audioEnabled = AppConfig.DEFAULT_AUDIO
     private var encoderMode = AppConfig.ENCODER_H264
     private var privateMode = false
     private var remoteControlEnabled = false
     private var token = ""
     private var accountEmail = ""
+    private var advancedOpen = false
 
-    /** 编码方式选项，与 encoderModes 一一对应 */
-    private val encoderChips: List<TextView> by lazy {
-        listOf(binding.chipH264, binding.chipH265, binding.chipJpeg)
-    }
-    private val encoderModes = listOf(
-        AppConfig.ENCODER_H264,
-        AppConfig.ENCODER_H265,
-        AppConfig.ENCODER_JPEG
-    )
-
-    /** 分辨率选项与 AppConfig.RESOLUTION_PRESETS 一一对应 */
-    private val resolutionChips: List<TextView> by lazy {
-        listOf(binding.chip270, binding.chip480, binding.chip720, binding.chip1080, binding.chipNative)
-    }
+    private val cameraPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                startCameraLive()
+            } else {
+                toast("未授予摄像头权限，无法进行摄像头直播")
+            }
+        }
 
     private val projectionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val data = result.data
             if (result.resultCode == RESULT_OK && data != null) {
-                startStream(result.resultCode, data)
+                startScreenLive(result.resultCode, data)
             } else {
-                setStatus("已取消屏幕采集授权，直播未开始", LEVEL_WARN)
+                toast("已取消屏幕采集授权，直播未开始")
             }
         }
 
     private val notificationLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             refreshPermissions()
-            if (!granted) setStatus("通知权限被拒绝，直播通知可能不可见", LEVEL_WARN)
+            if (!granted) toast("通知权限被拒绝，直播通知可能不可见")
         }
 
     private val audioPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            // 权限结果决定开关状态，避免出现「开关开着但录不了音」的假象
             binding.switchAudio.isChecked = granted
             audioEnabled = granted
             updateAudioHint()
-            if (!granted) setStatus("未授予录音权限，无法同步设备音频", LEVEL_WARN)
+            if (!granted) toast("未授予录音权限，无法同步设备音频")
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,11 +80,6 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        val prefs = getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE)
-        binding.etServer.setText(prefs.getString(AppConfig.KEY_SERVER, AppConfig.DEFAULT_SERVER))
-        binding.etRoom.setText(prefs.getString(AppConfig.KEY_ROOM, "").orEmpty().ifEmpty { AppConfig.randomRoom() })
-
-        // 未登录不允许进入控制台（开播需要账号）
         token = prefs.getString(AppConfig.KEY_TOKEN, "").orEmpty()
         accountEmail = prefs.getString(AppConfig.KEY_USER_EMAIL, "").orEmpty()
         if (token.isEmpty()) {
@@ -90,151 +87,54 @@ class MainActivity : AppCompatActivity() {
             finish()
             return
         }
-        binding.tvAccount.visibility = View.GONE
-        binding.tvUserEmail.text = accountEmail
-        binding.userBar.setOnClickListener { openUserCenter() }
-        binding.avatarBox.setOnClickListener { openUserCenter() }
-        binding.btnUserCenter.setOnClickListener { openUserCenter() }
-        binding.etTitle.setText(prefs.getString(AppConfig.KEY_TITLE, "").orEmpty())
-        binding.etTitle.addTextChangedListener(object : android.text.TextWatcher {
-            override fun afterTextChanged(s: android.text.Editable?) {
-                prefs.edit().putString(AppConfig.KEY_TITLE, s?.toString().orEmpty().trim()).apply()
-            }
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-        })
-        renderUser()
-        refreshProfile()
 
-        binding.sbFps.max = AppConfig.MAX_FPS - 1
-        binding.sbFps.progress = (AppConfig.DEFAULT_FPS - 1).coerceAtLeast(0)
-        binding.sbQuality.max = 70
-        binding.sbQuality.progress = (AppConfig.DEFAULT_QUALITY - 25).coerceAtLeast(0)
+        bindAccount()
+        bindTarget()
+        bindQuality()
+        bindOptions()
+        bindPermissions()
+        restoreAdvanced()
 
-        binding.sbFps.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) = updateParamLabels()
-            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-        })
-        binding.sbQuality.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) = updateParamLabels()
-            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-        })
-        updateParamLabels()
-
-        // 分辨率选项
-        resolutionPreset = prefs.getInt(AppConfig.KEY_RESOLUTION, AppConfig.DEFAULT_RESOLUTION)
-        resolutionChips.forEachIndexed { index, chip ->
-            chip.setOnClickListener {
-                val preset = AppConfig.RESOLUTION_PRESETS.getOrNull(index) ?: return@setOnClickListener
-                resolutionPreset = preset
-                updateResolutionChips()
-                updateResolutionHint()
-            }
-        }
-        updateResolutionChips()
-        updateResolutionHint()
-
-        // 编码方式（硬件 H.264 / JPEG 兼容）
-        encoderMode = prefs.getString(AppConfig.KEY_ENCODER, AppConfig.ENCODER_H264)
-            ?: AppConfig.ENCODER_H264
-        encoderChips.forEachIndexed { index, chip ->
-            chip.setOnClickListener {
-                val mode = encoderModes.getOrElse(index) { AppConfig.ENCODER_H264 }
-                if (mode == AppConfig.ENCODER_H265 && !ExpDisclaimer.isAccepted(this)) {
-                    // 实验性功能：先读完免责声明再启用，取消则保持原选择
-                    ExpDisclaimer.require(this, onAccept = {
-                        encoderMode = AppConfig.ENCODER_H265
-                        updateEncoderChips()
-                        setStatus("H.265 已启用（实验性）：若设备不支持会自动回退 H.264", LEVEL_WARN)
-                    })
-                    return@setOnClickListener
-                }
-                encoderMode = mode
-                updateEncoderChips()
-            }
-        }
-        updateEncoderChips()
-
-        // 设备音频同步开关
-        audioEnabled = prefs.getBoolean(AppConfig.KEY_AUDIO, AppConfig.DEFAULT_AUDIO)
-        binding.switchAudio.isChecked = audioEnabled
-        binding.switchAudio.setOnCheckedChangeListener { _, checked ->
-            if (checked && !hasAudioPermission()) {
-                // 先要录音权限（AudioRecord 内录同样需要它），再决定开关状态
-                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            } else {
-                audioEnabled = checked
-                updateAudioHint()
-            }
-        }
-        updateAudioHint()
-
-        // 隐私模式：开启后房间不出现在大厅列表
-        privateMode = prefs.getBoolean(AppConfig.KEY_PRIVATE, false)
-        binding.switchPrivate.isChecked = privateMode
-        binding.switchPrivate.setOnCheckedChangeListener { _, checked ->
-            privateMode = checked
-            updatePrivateHint()
-        }
-        updatePrivateHint()
-
-        // 远程控制：实验性功能，需先同意声明，再确保无障碍服务已启用
-        remoteControlEnabled = prefs.getBoolean(AppConfig.KEY_REMOTE_CONTROL, false)
-        binding.switchRemote.isChecked = remoteControlEnabled
-        binding.switchRemote.setOnCheckedChangeListener { _, checked ->
-            if (checked) {
-                if (!ExpDisclaimer.isAccepted(this)) {
-                    binding.switchRemote.isChecked = false
-                    ExpDisclaimer.require(this, onAccept = { enableRemoteControl() })
-                } else {
-                    enableRemoteControl()
-                }
-            } else {
-                remoteControlEnabled = false
-                prefs.edit().putBoolean(AppConfig.KEY_REMOTE_CONTROL, false).apply()
-                updateRemoteHint()
-            }
-        }
-        updateRemoteHint()
-
-        binding.btnOverlay.setOnClickListener { requestOverlayPermission() }
-        binding.btnNotify.setOnClickListener { requestNotificationPermission() }
-        binding.btnStart.setOnClickListener { startFlow() }
-        binding.btnStop.setOnClickListener {
-            startService(Intent(this, StreamService::class.java).setAction(StreamService.ACTION_STOP))
-            setStatus("正在停止直播…", LEVEL_NORMAL)
-        }
-        binding.btnDice.setOnClickListener {
-            binding.etRoom.setText(AppConfig.randomRoom())
-            updateServerHint()
-        }
-        binding.btnWeb.setOnClickListener { openWebReceiver() }
+        binding.btnCamera.setOnClickListener { onCameraClicked() }
+        binding.cameraCard.setOnClickListener { onCameraClicked() }
+        binding.btnScreen.setOnClickListener { onScreenClicked() }
+        binding.btnBackToLive.setOnClickListener { openLive() }
         binding.btnToReceiver.setOnClickListener {
             startActivity(
                 Intent(this, ReceiverActivity::class.java)
-                    .putExtra(AppConfig.KEY_SERVER, binding.etServer.text.toString().trim())
-                    .putExtra(AppConfig.KEY_ROOM, binding.etRoom.text.toString().trim())
+                    .putExtra(AppConfig.KEY_SERVER, server())
+                    .putExtra(AppConfig.KEY_ROOM, room())
             )
         }
-        binding.etRoom.setOnFocusChangeListener { _, _ -> updateServerHint() }
+        binding.btnWeb.setOnClickListener { openWebReceiver() }
+        binding.btnAdvanced.setOnClickListener { toggleAdvanced() }
 
-        updateServerHint()
+        if (!prefs.getBoolean(KEY_SEEN_CAMERA_TIP, false)) {
+            prefs.edit().putBoolean(KEY_SEEN_CAMERA_TIP, true).apply()
+        }
+        updateHint()
         refreshPermissions()
-        refreshControlState()
+        refreshLiveState()
     }
 
-    // ------------------------------------------------------------ 用户中心
+    // ------------------------------------------------------------ 账号
+    private fun bindAccount() {
+        binding.tvAccount.visibility = View.GONE
+        binding.userBar.setOnClickListener { openUserCenter() }
+        binding.avatarBox.setOnClickListener { openUserCenter() }
+        binding.btnUserCenter.setOnClickListener { openUserCenter() }
+        renderUser()
+        refreshProfile()
+    }
+
     private fun openUserCenter() {
         startActivity(Intent(this, UserCenterActivity::class.java))
     }
 
     private fun renderUser() {
-        val prefs = getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE)
         val nick = prefs.getString(AppConfig.KEY_NICKNAME, "").orEmpty()
         val avatar = prefs.getString(AppConfig.KEY_AVATAR, "").orEmpty()
-        binding.tvNickname.text = nick.ifBlank { "未设置昵称" }
+        binding.tvNickname.text = nick.ifBlank { accountEmail.ifBlank { "未设置昵称" } }
         val bmp = decodeAvatar(avatar)
         if (bmp != null) {
             binding.ivAvatar.setImageBitmap(bmp)
@@ -260,15 +160,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 从服务端拉一次最新资料，避免换手机后头像/昵称为空 */
     private fun refreshProfile() {
         if (token.isEmpty()) return
-        val base = AppConfig.httpBase(binding.etServer.text.toString().trim())
+        val base = AppConfig.httpBase(server())
         Thread {
             val resp = AuthApi.me(base, token)
             if (resp.code != 200) return@Thread
             val u = resp.body.optJSONObject("user") ?: return@Thread
-            getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE).edit()
+            prefs.edit()
                 .putString(AppConfig.KEY_NICKNAME, u.optString("nickname"))
                 .putString(AppConfig.KEY_AVATAR, u.optString("avatar"))
                 .apply()
@@ -276,53 +175,420 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    override fun onStart() {
-        super.onStart()
-        renderUser()
-        StreamService.onState = { text ->
-            setStatus(text, LEVEL_NORMAL)
-            // 悬浮窗上点「停止」时，本界面可能正处于前台，需要同步按钮状态
-            syncControls()
-        }
-        StreamService.onStats = { stats ->
-            val turboTag = if (stats.turbo) " ｜ 独享加速" else ""
-            val abrTag = when {
-                stats.targetKbps <= 0 -> ""
-                stats.degraded -> " ｜ 自适应 ${stats.targetKbps}k（已降档）"
-                else -> " ｜ 自适应 ${stats.targetKbps}k"
+    // ------------------------------------------------------------ 房间
+    private fun bindTarget() {
+        binding.etRoom.setText(
+            prefs.getString(AppConfig.KEY_ROOM, "").orEmpty().ifEmpty { AppConfig.randomRoom() }
+        )
+        binding.etRoom.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) {
+                prefs.edit().putString(AppConfig.KEY_ROOM, s?.toString().orEmpty().trim()).apply()
+                updateHint()
             }
-            binding.tvViewers.text =
-                "观众 ${stats.viewers} 人 ｜ 码率 ${stats.kbps} kbps ｜ 已发送 ${stats.frames} 帧 ｜ " +
-                        "丢帧 ${stats.dropped}$turboTag$abrTag"
+
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+        })
+        binding.btnDice.setOnClickListener {
+            binding.etRoom.setText(AppConfig.randomRoom())
         }
-        refreshControlState()
     }
 
+    // ------------------------------------------------------------ 参数
+    private fun bindQuality() {
+        binding.sbFps.max = AppConfig.MAX_FPS - 1
+        binding.sbFps.progress = (AppConfig.DEFAULT_FPS - 1).coerceAtLeast(0)
+        binding.sbQuality.max = 70
+        binding.sbQuality.progress = (AppConfig.DEFAULT_QUALITY - 25).coerceAtLeast(0)
+        binding.sbFps.setOnSeekBarChangeListener(seekListener())
+        binding.sbQuality.setOnSeekBarChangeListener(seekListener())
+        updateParamLabels()
+
+        preset = prefs.getInt(AppConfig.KEY_RESOLUTION, AppConfig.DEFAULT_RESOLUTION)
+        // 摄像头只开放 480/720/1080 三档，超出范围时归一到 720
+        if (preset !in AppConfig.CAMERA_PRESETS) preset = 720
+        val chips = listOf(binding.chip480, binding.chip720, binding.chip1080)
+        chips.forEachIndexed { index, chip ->
+            chip.setOnClickListener {
+                preset = AppConfig.CAMERA_PRESETS[index]
+                updateChips()
+                updateResolutionHint()
+            }
+        }
+        updateChips()
+        updateResolutionHint()
+
+        encoderMode = prefs.getString(AppConfig.KEY_ENCODER, AppConfig.ENCODER_H264)
+            ?: AppConfig.ENCODER_H264
+        binding.chipEncoder.setOnClickListener { cycleEncoder() }
+        updateEncoderChip()
+    }
+
+    private fun seekListener() = object : SeekBar.OnSeekBarChangeListener {
+        override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) =
+            updateParamLabels()
+
+        override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+        override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+    }
+
+    private fun bindOptions() {
+        privateMode = prefs.getBoolean(AppConfig.KEY_PRIVATE, false)
+        binding.switchPrivate.isChecked = privateMode
+        binding.switchPrivate.setOnCheckedChangeListener { _, checked ->
+            privateMode = checked
+            updatePrivateHint()
+        }
+        updatePrivateHint()
+
+        audioEnabled = prefs.getBoolean(AppConfig.KEY_AUDIO, AppConfig.DEFAULT_AUDIO)
+        binding.switchAudio.isChecked = audioEnabled
+        binding.switchAudio.setOnCheckedChangeListener { _, checked ->
+            if (checked && !hasAudioPermission()) {
+                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            } else {
+                audioEnabled = checked
+                updateAudioHint()
+            }
+        }
+        updateAudioHint()
+
+        remoteControlEnabled = prefs.getBoolean(AppConfig.KEY_REMOTE_CONTROL, false)
+        binding.switchRemote.isChecked = remoteControlEnabled
+        binding.switchRemote.setOnCheckedChangeListener { _, checked ->
+            if (checked) {
+                if (!ExpDisclaimer.isAccepted(this)) {
+                    binding.switchRemote.isChecked = false
+                    ExpDisclaimer.require(this, onAccept = { enableRemoteControl() })
+                } else {
+                    enableRemoteControl()
+                }
+            } else {
+                remoteControlEnabled = false
+                prefs.edit().putBoolean(AppConfig.KEY_REMOTE_CONTROL, false).apply()
+                updateRemoteHint()
+            }
+        }
+        updateRemoteHint()
+
+        binding.tvRemoteControlManage.setOnClickListener {
+            try {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            } catch (e: Exception) {
+                toast("无法打开无障碍设置，请手动前往系统设置")
+            }
+        }
+
+        binding.btnServerEdit.setOnClickListener {
+            val et = binding.etServer
+            if (et.visibility == View.VISIBLE) {
+                val v = et.text.toString().trim()
+                if (!AppConfig.isValidServer(v)) {
+                    toast("地址需以 ws:// 或 wss:// 开头")
+                    return@setOnClickListener
+                }
+                prefs.edit().putString(AppConfig.KEY_SERVER, v).apply()
+                et.visibility = View.GONE
+                updateHint()
+            } else {
+                et.setText(server())
+                et.visibility = View.VISIBLE
+                et.requestFocus()
+            }
+        }
+    }
+
+    private fun bindPermissions() {
+        binding.btnOverlay.setOnClickListener { requestOverlayPermission() }
+        binding.btnNotify.setOnClickListener { requestNotificationPermission() }
+    }
+
+    private fun toggleAdvanced() {
+        advancedOpen = !advancedOpen
+        binding.advancedPanel.visibility = if (advancedOpen) View.VISIBLE else View.GONE
+        binding.btnAdvanced.text = if (advancedOpen) "收起高级设置 ⌃" else "高级设置 ›"
+        updateChips()
+    }
+
+    private fun restoreAdvanced() {
+        advancedOpen = prefs.getBoolean(KEY_ADVANCED_OPEN, false)
+        binding.advancedPanel.visibility = if (advancedOpen) View.VISIBLE else View.GONE
+        binding.btnAdvanced.text = if (advancedOpen) "收起高级设置 ⌃" else "高级设置 ›"
+    }
+
+    override fun onPause() {
+        prefs.edit().putBoolean(KEY_ADVANCED_OPEN, advancedOpen).apply()
+        super.onPause()
+    }
+
+    // ------------------------------------------------------------ 开播
+    private fun onCameraClicked() {
+        if (isLive()) {
+            openLive()
+            return
+        }
+        saveOptions()
+        if (!hasCameraPermission()) {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            return
+        }
+        startCameraLive()
+    }
+
+    private fun startCameraLive() {
+        if (room().isEmpty()) {
+            toast("请先填写房间号")
+            return
+        }
+        if (!requiresOverlay()) {
+            // 摄像头直播不强制浮窗：直播间页面本身就是控制台
+            startActivity(
+                Intent(this, LiveActivity::class.java)
+                    .putExtra(AppConfig.KEY_MODE, AppConfig.MODE_CAMERA)
+                    .putExtra(AppConfig.KEY_SERVER, server())
+                    .putExtra(AppConfig.KEY_ROOM, room())
+            )
+            return
+        }
+        startActivity(
+            Intent(this, LiveActivity::class.java)
+                .putExtra(AppConfig.KEY_MODE, AppConfig.MODE_CAMERA)
+                .putExtra(AppConfig.KEY_SERVER, server())
+                .putExtra(AppConfig.KEY_ROOM, room())
+        )
+    }
+
+    /** 摄像头直播直接进直播页（预览 + 一键开始），浮窗只在屏幕直播时用 */
+    private fun requiresOverlay(): Boolean = false
+
+    private fun onScreenClicked() {
+        if (isLive()) {
+            toast("直播进行中，请先结束当前直播")
+            return
+        }
+        if (room().isEmpty()) {
+            toast("请先填写房间号")
+            return
+        }
+        saveOptions()
+        if (!Settings.canDrawOverlays(this)) {
+            toast("请先允许「显示在其他应用上层」，直播时需要它提供停止按钮")
+            requestOverlayPermission()
+            return
+        }
+        val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        projectionLauncher.launch(mpm.createScreenCaptureIntent())
+    }
+
+    private fun startScreenLive(resultCode: Int, data: Intent) {
+        val intent = Intent(this, StreamService::class.java).apply {
+            action = StreamService.ACTION_START
+            putExtra(StreamService.EXTRA_RESULT_CODE, resultCode)
+            putExtra(StreamService.EXTRA_RESULT_DATA, data)
+            putExtra(StreamService.EXTRA_SERVER, server())
+            putExtra(StreamService.EXTRA_ROOM, room())
+            putExtra(StreamService.EXTRA_FPS, currentFps())
+            putExtra(StreamService.EXTRA_QUALITY, currentQuality())
+            putExtra(StreamService.EXTRA_RESOLUTION, preset)
+            putExtra(StreamService.EXTRA_AUDIO, audioEnabled)
+            putExtra(StreamService.EXTRA_ENCODER, encoderMode)
+            putExtra(StreamService.EXTRA_TOKEN, token)
+            putExtra(StreamService.EXTRA_TITLE, "")
+            putExtra(StreamService.EXTRA_PRIVATE, privateMode)
+            putExtra(StreamService.EXTRA_REMOTE_CONTROL, remoteControlEnabled)
+        }
+        ContextCompat.startForegroundService(this, intent)
+        toast("屏幕直播已开始，切到要分享的画面即可")
+        binding.root.postDelayed({ refreshLiveState() }, 800)
+    }
+
+    private fun openLive() {
+        startActivity(Intent(this, LiveActivity::class.java))
+    }
+
+    private fun openWebReceiver() {
+        if (room().isEmpty()) {
+            toast("请先填写房间号")
+            return
+        }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(AppConfig.webUrl(server(), room()))))
+        } catch (e: Exception) {
+            toast("无法打开浏览器：${e.message}")
+        }
+    }
+
+    private fun saveOptions() {
+        prefs.edit()
+            .putString(AppConfig.KEY_SERVER, server())
+            .putString(AppConfig.KEY_ROOM, room())
+            .putInt(AppConfig.KEY_RESOLUTION, preset)
+            .putBoolean(AppConfig.KEY_AUDIO, audioEnabled)
+            .putString(AppConfig.KEY_ENCODER, encoderMode)
+            .putBoolean(AppConfig.KEY_PRIVATE, privateMode)
+            .putBoolean(AppConfig.KEY_REMOTE_CONTROL, remoteControlEnabled)
+            .apply()
+    }
+
+    // ------------------------------------------------------------ 生命周期
     override fun onResume() {
         super.onResume()
+        renderUser()
         refreshPermissions()
-        refreshControlState()
-        // 用户可能刚从系统设置返回：无障碍服务被关掉时，开关必须同步回滚
+        refreshLiveState()
         if (remoteControlEnabled && !isAccessibilityEnabled()) {
             remoteControlEnabled = false
             binding.switchRemote.isChecked = false
-            getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE).edit()
-                .putBoolean(AppConfig.KEY_REMOTE_CONTROL, false).apply()
-            setStatus("无障碍服务未启用，远程控制已自动关闭", LEVEL_WARN)
+            prefs.edit().putBoolean(AppConfig.KEY_REMOTE_CONTROL, false).apply()
         }
         updateRemoteHint()
     }
 
+    override fun onStart() {
+        super.onStart()
+        StreamService.onStats = { stats -> runOnUiThread { renderLiveStats(stats) } }
+        StreamService.onState = { text -> runOnUiThread { binding.tvLiveState.text = text } }
+        refreshLiveState()
+    }
+
     override fun onStop() {
-        StreamService.onState = null
         StreamService.onStats = null
+        StreamService.onState = null
         super.onStop()
+    }
+
+    // ------------------------------------------------------------ 状态
+    private fun isLive(): Boolean = StreamService.running || CameraStreamService.running
+
+    private fun refreshLiveState() {
+        val screen = StreamService.running
+        val camera = CameraStreamService.running
+        val live = screen || camera
+        binding.liveBanner.visibility = if (live) View.VISIBLE else View.GONE
+        binding.targetCard.visibility = if (live) View.GONE else View.VISIBLE
+        binding.cameraCard.visibility = if (live) View.GONE else View.VISIBLE
+        binding.btnCamera.text = if (live) "回到直播间" else "摄像头直播"
+        binding.btnScreen.visibility = if (live) View.GONE else View.VISIBLE
+        binding.tvHint.visibility = if (live) View.GONE else View.VISIBLE
+        if (live) {
+            binding.tvLiveState.text =
+                if (camera) "摄像头直播中 · 房间 ${room()}" else "屏幕直播中 · 房间 ${room()}"
+            binding.tvLiveStats.text = "正在等待统计…"
+            val color = ContextCompat.getColor(this, R.color.ok)
+            binding.dotLive.background.mutate().setTint(color)
+        } else {
+            binding.tvLiveStats.text = ""
+        }
+    }
+
+    private fun renderLiveStats(stats: StreamStats) {
+        if (!StreamService.running) return
+        val turboTag = if (stats.turbo) " · 独享加速" else ""
+        binding.tvLiveStats.text =
+            "${stats.viewers} 人观看 · ${stats.kbps} kbps · ${stats.frames} 帧$turboTag"
+    }
+
+    private fun updateHint() {
+        val r = room()
+        binding.tvTargetHint.text = if (r.isEmpty()) {
+            "填一个 4 位数字，观看的人输入同样的号码就能看到画面"
+        } else {
+            "网页观看：${AppConfig.webUrl(server(), r).removePrefix("https://")}"
+        }
+    }
+
+    private fun updateParamLabels() {
+        binding.tvFps.text = "${currentFps()} fps"
+        binding.tvQuality.text = "${currentQuality()} %"
+    }
+
+    private fun currentFps(): Int = (binding.sbFps.progress + 1).coerceIn(1, AppConfig.MAX_FPS)
+
+    private fun currentQuality(): Int = (binding.sbQuality.progress + 25).coerceIn(20, 95)
+
+    private fun updateChips() {
+        val chips = listOf(binding.chip480, binding.chip720, binding.chip1080)
+        chips.forEachIndexed { index, chip ->
+            val selected = AppConfig.CAMERA_PRESETS[index] == preset
+            chip.setBackgroundResource(if (selected) R.drawable.bg_chip_on else R.drawable.bg_chip)
+            chip.setTextColor(
+                ContextCompat.getColor(this, if (selected) R.color.white else R.color.muted)
+            )
+        }
+    }
+
+    private fun updateResolutionHint() {
+        binding.tvResolutionHint.text = when (preset) {
+            480 -> "短边 480p：省流量，弱网首选"
+            1080 -> "短边 1080p：画质最好，需要较好的网络"
+            else -> "短边 720p：清晰与流量的平衡点"
+        }
+    }
+
+    private fun cycleEncoder() {
+        if (encoderMode == AppConfig.ENCODER_H265 && !ExpDisclaimer.isAccepted(this)) return
+        encoderMode = if (encoderMode == AppConfig.ENCODER_H264) {
+            AppConfig.ENCODER_JPEG
+        } else if (encoderMode == AppConfig.ENCODER_JPEG) {
+            AppConfig.ENCODER_H265
+        } else {
+            AppConfig.ENCODER_H264
+        }
+        if (encoderMode == AppConfig.ENCODER_H265 && !ExpDisclaimer.isAccepted(this)) {
+            encoderMode = AppConfig.ENCODER_H264
+            ExpDisclaimer.require(this, onAccept = {
+                encoderMode = AppConfig.ENCODER_H265
+                updateEncoderChip()
+                toast("H.265 已启用（实验性），不支持时自动回退")
+            })
+        }
+        updateEncoderChip()
+    }
+
+    private fun updateEncoderChip() {
+        binding.chipEncoder.text = when (encoderMode) {
+            AppConfig.ENCODER_H265 -> "H.265"
+            AppConfig.ENCODER_JPEG -> "JPEG"
+            else -> "H.264"
+        }
+        binding.tvEncoderHint.text = when (encoderMode) {
+            AppConfig.ENCODER_H265 -> "实验：码率更低，需设备支持 HEVC"
+            AppConfig.ENCODER_JPEG -> "兼容：什么设备都能播，但流量大"
+            else -> "推荐：硬件编码，省电省流量"
+        }
+        binding.chipEncoder.setTextColor(
+            ContextCompat.getColor(
+                this,
+                if (encoderMode == AppConfig.ENCODER_H265) R.color.warn else R.color.text
+            )
+        )
+    }
+
+    private fun updatePrivateHint() {
+        binding.tvPrivateHint.text =
+            if (privateMode) "已开启：只有知道房间号的人能进" else "关闭：房间会出现在大厅"
+    }
+
+    private fun updateAudioHint() {
+        binding.tvAudioHint.text = when {
+            !audioEnabled -> "关闭：只传画面"
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> "系统版本不支持内录"
+            else -> "抓取手机播放的声音"
+        }
+    }
+
+    private fun updateRemoteHint() {
+        binding.tvRemoteHint.text = when {
+            !remoteControlEnabled -> "关闭：观众只能看，不能操作"
+            !isAccessibilityEnabled() -> "已开启，但无障碍服务未开，申请会被拒绝"
+            else -> "开启：观众可申请操作，你能随时收回"
+        }
     }
 
     // ------------------------------------------------------------ 权限
     private fun requestOverlayPermission() {
         if (Settings.canDrawOverlays(this)) {
-            setStatus("浮窗权限已授权", LEVEL_OK)
+            toast("浮窗权限已授权")
             return
         }
         startActivity(
@@ -340,168 +606,41 @@ class MainActivity : AppCompatActivity() {
         ) {
             notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            setStatus("通知权限已授权", LEVEL_OK)
+            toast("通知权限已授权")
         }
     }
 
     private fun refreshPermissions() {
         val overlayOk = Settings.canDrawOverlays(this)
-        binding.tvOverlayStatus.text = getString(if (overlayOk) R.string.perm_granted else R.string.perm_denied)
+        binding.tvOverlayStatus.text =
+            getString(if (overlayOk) R.string.perm_granted else R.string.perm_denied)
         binding.tvOverlayStatus.setTextColor(
             ContextCompat.getColor(this, if (overlayOk) R.color.ok else R.color.warn)
         )
+        binding.btnOverlay.text = if (overlayOk) "已开" else "开启"
+        binding.btnOverlay.isEnabled = !overlayOk
 
         val notifyOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
                 PackageManager.PERMISSION_GRANTED
-        binding.tvNotifyStatus.text = getString(if (notifyOk) R.string.perm_granted else R.string.perm_denied)
+        binding.tvNotifyStatus.text =
+            getString(if (notifyOk) R.string.perm_granted else R.string.perm_denied)
         binding.tvNotifyStatus.setTextColor(
             ContextCompat.getColor(this, if (notifyOk) R.color.ok else R.color.warn)
         )
+        binding.btnNotify.text = if (notifyOk) "已开" else "开启"
+        binding.btnNotify.isEnabled = !notifyOk
     }
 
-    // ------------------------------------------------------------ 直播流程
-    private fun startFlow() {
-        val server = binding.etServer.text.toString().trim()
-        val room = binding.etRoom.text.toString().trim()
-
-        if (!AppConfig.isValidServer(server)) {
-            setStatus("中继地址需以 ws:// 或 wss:// 开头", LEVEL_ERR)
-            return
-        }
-        if (room.isEmpty()) {
-            setStatus("请填写房间号", LEVEL_ERR)
-            return
-        }
-        getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE).edit()
-            .putString(AppConfig.KEY_SERVER, server)
-            .putString(AppConfig.KEY_ROOM, room)
-            .putInt(AppConfig.KEY_RESOLUTION, resolutionPreset)
-            .putBoolean(AppConfig.KEY_AUDIO, audioEnabled)
-            .putString(AppConfig.KEY_ENCODER, encoderMode)
-            .putBoolean(AppConfig.KEY_PRIVATE, privateMode)
-            .putBoolean(AppConfig.KEY_REMOTE_CONTROL, remoteControlEnabled)
-            .apply()
-
-        if (!Settings.canDrawOverlays(this)) {
-            setStatus("请先授予浮窗权限（用于显示直播状态条）", LEVEL_WARN)
-            requestOverlayPermission()
-            return
-        }
-
-        val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        setStatus("请在弹出的系统窗口中允许屏幕采集…", LEVEL_NORMAL)
-        projectionLauncher.launch(mpm.createScreenCaptureIntent())
-    }
-
-    private fun startStream(resultCode: Int, data: Intent) {
-        val intent = Intent(this, StreamService::class.java).apply {
-            action = StreamService.ACTION_START
-            putExtra(StreamService.EXTRA_RESULT_CODE, resultCode)
-            putExtra(StreamService.EXTRA_RESULT_DATA, data)
-            putExtra(StreamService.EXTRA_SERVER, binding.etServer.text.toString().trim())
-            putExtra(StreamService.EXTRA_ROOM, binding.etRoom.text.toString().trim())
-            putExtra(StreamService.EXTRA_FPS, currentFps())
-            putExtra(StreamService.EXTRA_QUALITY, currentQuality())
-            putExtra(StreamService.EXTRA_RESOLUTION, resolutionPreset)
-            putExtra(StreamService.EXTRA_AUDIO, audioEnabled)
-            putExtra(StreamService.EXTRA_ENCODER, encoderMode)
-            putExtra(StreamService.EXTRA_TOKEN, token)
-            putExtra(StreamService.EXTRA_TITLE, binding.etTitle.text.toString().trim())
-            putExtra(StreamService.EXTRA_PRIVATE, privateMode)
-            putExtra(StreamService.EXTRA_REMOTE_CONTROL, remoteControlEnabled)
-        }
-        ContextCompat.startForegroundService(this, intent)
-        setStatus("正在启动屏幕直播…", LEVEL_NORMAL)
-        binding.root.postDelayed({ refreshControlState() }, 800)
-    }
-
-    private fun openWebReceiver() {
-        val server = binding.etServer.text.toString().trim()
-        val room = binding.etRoom.text.toString().trim()
-        if (room.isEmpty()) {
-            setStatus("请先填写房间号", LEVEL_WARN)
-            return
-        }
-        val url = AppConfig.webUrl(server, room)
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
-        } catch (e: Exception) {
-            setStatus("无法打开浏览器：${e.message}", LEVEL_ERR)
-        }
-    }
-
-    // ------------------------------------------------------------ UI 辅助
-    private fun currentFps(): Int = (binding.sbFps.progress + 1).coerceIn(1, AppConfig.MAX_FPS)
-
-    private fun currentQuality(): Int = (binding.sbQuality.progress + 25).coerceIn(20, 95)
-
-    private fun updateParamLabels() {
-        binding.tvFps.text = "${currentFps()} fps"
-        binding.tvQuality.text = "${currentQuality()} %"
-    }
-
-    private fun updateResolutionChips() {
-        resolutionChips.forEachIndexed { index, chip ->
-            val preset = AppConfig.RESOLUTION_PRESETS.getOrNull(index) ?: return@forEachIndexed
-            val selected = preset == resolutionPreset
-            chip.setBackgroundResource(if (selected) R.drawable.bg_chip_on else R.drawable.bg_chip)
-            chip.setTextColor(ContextCompat.getColor(this, if (selected) R.color.white else R.color.muted))
-        }
-    }
-
-    private fun updateEncoderChips() {
-        encoderChips.forEachIndexed { index, chip ->
-            val mode = encoderModes.getOrElse(index) { AppConfig.ENCODER_H264 }
-            val selected = mode == encoderMode
-            chip.setBackgroundResource(if (selected) R.drawable.bg_chip_on else R.drawable.bg_chip)
-            chip.setTextColor(ContextCompat.getColor(this, if (selected) R.color.white else R.color.muted))
-        }
-        binding.tvEncoderHint.text = when (encoderMode) {
-            AppConfig.ENCODER_H265 ->
-                "实验性：同画质码率比 H.264 低约 30%~50%，需设备支持 HEVC 硬编；不支持时自动回退"
-            AppConfig.ENCODER_H264 ->
-                "硬件编码：CPU 与带宽低一个数量级，60fps 首选；若出现黑屏可切到兼容模式"
-            else ->
-                "逐帧压缩：兼容性最好，但高帧率下 CPU 占用高、带宽大"
-        }
-    }
-
-    /** 用与服务端完全一致的算法预览实际输出尺寸 */
-    private fun updateResolutionHint() {
-        val (screenW, screenH) = screenSize()
-        val (w, h) = AppConfig.targetSize(screenW, screenH, resolutionPreset)
-        val note = when {
-            resolutionPreset == AppConfig.RES_NATIVE -> "（手机原生，不做缩放）"
-            resolutionPreset > minOf(screenW, screenH) -> "（预设高于屏幕，按屏幕输出）"
-            else -> ""
-        }
-        binding.tvResolutionHint.text = "实际输出 ${w}×${h}$note"
-    }
+    private fun hasCameraPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
 
     private fun hasAudioPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
                 PackageManager.PERMISSION_GRANTED
 
-    private fun updateAudioHint() {
-        binding.tvAudioHint.text = when {
-            !audioEnabled -> "关闭：只传输画面，不传声音"
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ->
-                "当前系统低于 Android 10，不支持设备音频内录"
-            else -> "抓取系统播放的声音（不含麦克风）；部分 App 会禁止被内录"
-        }
-    }
-
-    private fun updatePrivateHint() {
-        binding.tvPrivateHint.text = if (privateMode) {
-            "已开启：房间不出现在大厅，凭房间号仍可进入"
-        } else {
-            "关闭：房间会出现在大厅，任何人可见"
-        }
-    }
-
     // ------------------------------------------------------------ 实验性功能
-    /** 无障碍服务是否已在系统设置中启用（以系统设置为准，避免只信进程内状态） */
     private fun isAccessibilityEnabled(): Boolean {
         val expected = "$packageName/${RemoteControlService::class.java.name}"
         val enabled = try {
@@ -516,29 +655,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun enableRemoteControl() {
-        val prefs = getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE)
         remoteControlEnabled = true
         binding.switchRemote.isChecked = true
         prefs.edit().putBoolean(AppConfig.KEY_REMOTE_CONTROL, true).apply()
         updateRemoteHint()
-
         if (!isAccessibilityEnabled()) {
-            setStatus("请在系统设置中启用「${getString(R.string.app_name)}」无障碍服务", LEVEL_WARN)
+            toast("请在系统设置中启用「${getString(R.string.app_name)}」无障碍服务")
             try {
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             } catch (e: Exception) {
-                setStatus("无法打开无障碍设置，请手动前往系统设置开启", LEVEL_ERR)
+                toast("无法打开无障碍设置，请手动前往系统设置")
             }
         } else {
-            setStatus("远程控制已开启（实验性）", LEVEL_OK)
-        }
-    }
-
-    private fun updateRemoteHint() {
-        binding.tvRemoteHint.text = when {
-            !remoteControlEnabled -> "关闭：观看端无法申请操作本机"
-            !isAccessibilityEnabled() -> "已开启，但无障碍服务未启用：请到系统设置开启，否则申请会被自动拒绝"
-            else -> "已开启：观看端可申请操作本机，浮窗可随时通过或拒绝，单次最长 ${AppConfig.CONTROL_MAX_MINUTES} 分钟"
+            toast("远程控制已开启（实验性）")
         }
     }
 
@@ -547,9 +676,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("退出登录")
             .setMessage("退出后需要重新登录才能开播，确定吗？")
             .setPositiveButton("退出") { _, _ ->
-                getSharedPreferences(AppConfig.PREFS, MODE_PRIVATE).edit()
-                    .remove(AppConfig.KEY_TOKEN)
-                    .apply()
+                prefs.edit().remove(AppConfig.KEY_TOKEN).apply()
                 startActivity(Intent(this, LoginActivity::class.java))
                 finish()
             }
@@ -557,74 +684,20 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun screenSize(): Pair<Int, Int> {
-        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val bounds = wm.currentWindowMetrics.bounds
-            bounds.width() to bounds.height()
-        } else {
-            val point = android.graphics.Point()
-            @Suppress("DEPRECATION")
-            wm.defaultDisplay.getRealSize(point)
-            point.x to point.y
-        }
-    }
+    // ------------------------------------------------------------ 工具
+    private fun server(): String =
+        (if (binding.etServer.visibility == View.VISIBLE) binding.etServer.text.toString().trim()
+        else prefs.getString(AppConfig.KEY_SERVER, AppConfig.DEFAULT_SERVER).orEmpty())
+            .ifBlank { AppConfig.DEFAULT_SERVER }
 
-    private fun updateServerHint() {
-        val room = binding.etRoom.text.toString().trim()
-        val server = binding.etServer.text.toString().trim()
-        binding.tvServerHint.text = if (room.isEmpty()) {
-            "同一房间号的设备才能互相看到画面"
-        } else {
-            "网页观看地址：${AppConfig.webUrl(server, room)}"
-        }
-    }
+    private fun room(): String = binding.etRoom.text.toString().trim()
 
-    private fun syncControls() {
-        val live = StreamService.running
-        binding.btnStart.visibility = if (live) View.GONE else View.VISIBLE
-        binding.btnStop.visibility = if (live) View.VISIBLE else View.GONE
-        if (!live) binding.tvViewers.text = ""
-
-        // 直播中参数不可改：改动会在下次开播时生效，禁用可避免误解
-        binding.sbFps.isEnabled = !live
-        binding.sbQuality.isEnabled = !live
-        binding.switchAudio.isEnabled = !live
-        binding.switchPrivate.isEnabled = !live
-        binding.switchRemote.isEnabled = !live
-        encoderChips.forEach { chip ->
-            chip.isEnabled = !live
-            chip.alpha = if (live) 0.5f else 1f
-        }
-        resolutionChips.forEach { chip ->
-            chip.isEnabled = !live
-            chip.alpha = if (live) 0.5f else 1f
-        }
-    }
-
-    private fun refreshControlState() {
-        syncControls()
-        if (!StreamService.running) {
-            setStatus("待机中 · 配置好后点击「开始屏幕直播」", LEVEL_NORMAL)
-        }
-    }
-
-    private fun setStatus(text: String, level: Int) {
-        binding.tvStatus.text = text
-        val color = when (level) {
-            LEVEL_OK -> R.color.ok
-            LEVEL_WARN -> R.color.warn
-            LEVEL_ERR -> R.color.err
-            else -> R.color.muted
-        }
-        binding.dotStatus.background.mutate().setTint(ContextCompat.getColor(this, color))
-        binding.tvStatus.setTextColor(ContextCompat.getColor(this, if (level == LEVEL_NORMAL) R.color.text else color))
+    private fun toast(text: String) {
+        android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private companion object {
-        const val LEVEL_NORMAL = 0
-        const val LEVEL_OK = 1
-        const val LEVEL_WARN = 2
-        const val LEVEL_ERR = 3
+        const val KEY_ADVANCED_OPEN = "advanced_open"
+        const val KEY_SEEN_CAMERA_TIP = "seen_camera_tip"
     }
 }
