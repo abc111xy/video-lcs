@@ -87,23 +87,44 @@
   button.warn { background: transparent; border-color: var(--warn); color: var(--warn); }
   button.danger { background: transparent; border-color: var(--err); color: var(--err); }
 
+  /* 单行胶囊工具条：left:0 + right:0 + margin:auto 居中，避免只用 left:50% 时
+     收缩宽度被限制成容器一半导致按钮折行 */
   .ctrl-bar {
-    display: none; position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
-    z-index: 5; align-items: center; gap: 6px; padding: 7px 8px;
-    background: rgba(20, 26, 36, .92); border: 1px solid var(--line); border-radius: 99px;
-    backdrop-filter: blur(6px); max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: center;
+    display: none; position: absolute; left: 0; right: 0; bottom: 14px;
+    width: max-content; max-width: calc(100% - 16px); margin: 0 auto;
+    z-index: 5; align-items: center; gap: 6px; padding: 6px 8px;
+    background: rgba(20, 26, 36, .92); border: 1px solid rgba(255, 255, 255, .16); border-radius: 999px;
+    backdrop-filter: blur(6px); flex-wrap: nowrap; justify-content: center;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    /* 条底恒为深色，前景不能跟随主题翻转，否则亮色主题下深字压深底 */
+    color: #e8eef8;
   }
+  .ctrl-bar::-webkit-scrollbar { display: none; }
   .ctrl-bar.on { display: flex; }
   .ctrl-bar button {
-    font-size: 12px; padding: 6px 11px; border-radius: 99px;
-    background: transparent; border-color: var(--line); color: var(--text); font-weight: 500;
+    flex: 0 0 auto; white-space: nowrap; line-height: 1.35;
+    font-size: 12px; padding: 6px 11px; border-radius: 999px;
+    background: transparent; border-color: rgba(255, 255, 255, .22); color: #e8eef8; font-weight: 500;
   }
-  .ctrl-bar button.danger { border-color: var(--err); color: var(--err); }
+  .ctrl-bar button:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+  /* 窄屏堆叠：三键一行 + 退出控制整行，顶部单独一行状态 */
+  .ctrl-bar.stack {
+    flex-wrap: wrap; width: calc(100% - 16px); border-radius: 14px;
+    gap: 6px; padding: 8px; overflow: visible;
+  }
+  .ctrl-bar.stack .ctrl-tag { width: 100%; justify-content: center; padding: 0 0 1px; }
+  .ctrl-bar.stack button { flex: 1 1 28%; }
+  .ctrl-bar.stack #ctrlExit { flex: 1 1 100%; margin-left: 0; }
+  .ctrl-bar button.danger { border-color: rgba(255, 123, 114, .55); color: #ff7b72; }
+  .ctrl-bar button.danger:hover { background: rgba(255, 123, 114, .14); color: #ff9a93; }
   .ctrl-tag {
-    font-size: 11px; color: var(--err); display: inline-flex; align-items: center; gap: 5px;
+    flex: 0 0 auto; white-space: nowrap;
+    font-size: 11px; color: #ff7b72; display: inline-flex; align-items: center; gap: 5px;
     padding: 0 6px 0 4px;
   }
-  .ctrl-tag::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--err); animation: pulse 1.6s infinite; }
+  #ctrlExit { margin-left: 2px; }
+  .ctrl-tag::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #ff7b72; animation: pulse 1.6s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 
   /* ---------------- 免责声明弹窗 ---------------- */
@@ -449,7 +470,16 @@
   function enterControlMode() {
     document.querySelector('.screen').classList.add('ctl');
     $('ctrlBar').classList.add('on');
+    fitCtrlBar();
     updateControlButton();
+  }
+
+  /** 手机竖屏时画面很窄，胶囊条放不下四个按钮：测出溢出后改成堆叠卡片 */
+  function fitCtrlBar() {
+    const bar = $('ctrlBar');
+    if (!bar || !bar.classList.contains('on')) return;
+    bar.classList.remove('stack');
+    if (bar.scrollWidth > bar.clientWidth + 1) bar.classList.add('stack');
   }
 
   function exitControlMode(notify) {
@@ -957,6 +987,12 @@
 
   document.addEventListener('fullscreenchange', updateFsButton);
   document.addEventListener('webkitfullscreenchange', updateFsButton);
+  // 全屏切换 / 旋转 / 缩放后画面宽度会变，控制条需重新判断是否要堆叠
+  document.addEventListener('fullscreenchange', fitCtrlBar);
+  document.addEventListener('webkitfullscreenchange', fitCtrlBar);
+  window.addEventListener('resize', fitCtrlBar);
+  window.addEventListener('orientationchange', fitCtrlBar);
+  if (window.ResizeObserver) new ResizeObserver(fitCtrlBar).observe(screenEl);
   screenEl.addEventListener('click', () => {
     // 控制模式下点击画面用于操作被控设备，不能触发全屏切换
     if (controlState === 'active') return;
