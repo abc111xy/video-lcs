@@ -582,6 +582,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // 下载页别名：便于口头传播 /download
+  if (p === '/download' || p === '/download.html') {
+    res.writeHead(302, { Location: '/' });
+    res.end();
+    return;
+  }
+
   // 网页接收端 / 首页
   const file = p === '/' ? 'index.html' : p.replace(/^\//, '');
   const safe = path.join(__dirname, 'public', path.normalize(file).replace(/^(\.\.[/\\])+/, ''));

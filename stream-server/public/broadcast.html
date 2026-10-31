@@ -50,19 +50,19 @@
   /* 直播中角标 */
   .badge {
     position: absolute; top: 12px; left: 12px; display: none; align-items: center; gap: 6px;
-    background: rgba(20,26,36,.82); border: 1px solid var(--line); border-radius: 99px;
-    padding: 5px 11px; font-size: 11.5px; color: var(--text); backdrop-filter: blur(6px);
+    background: rgba(20,26,36,.82); border: 1px solid rgba(255,255,255,.16); border-radius: 99px;
+    padding: 5px 11px; font-size: 11.5px; color: #e6edf6; backdrop-filter: blur(6px);
   }
   .stage.live .badge { display: flex; }
   .badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--err); animation: pulse 1.6s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
   .stats {
     position: absolute; left: 12px; bottom: 12px; display: none; gap: 14px;
-    background: rgba(20,26,36,.82); border: 1px solid var(--line); border-radius: 10px;
-    padding: 8px 12px; font-size: 11.5px; color: var(--muted); backdrop-filter: blur(6px);
+    background: rgba(20,26,36,.82); border: 1px solid rgba(255,255,255,.16); border-radius: 10px;
+    padding: 8px 12px; font-size: 11.5px; color: #a9b6c9; backdrop-filter: blur(6px);
   }
   .stage.live .stats { display: flex; }
-  .stats b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stats b { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
 
   /* ---------------- 设置面板 ---------------- */
   .panel { display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto; }
