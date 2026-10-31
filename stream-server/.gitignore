@@ -4,8 +4,5 @@ data/
 *.log
 .DS_Store
 
-# 构建产物：APK 不入库，部署时由 CI/本地构建后放入
-public/download/*.apk
-
 # 维护开关：存在即进入维护模式，属于运行时状态，不入库
 .maintenance

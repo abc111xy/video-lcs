@@ -99,6 +99,14 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   const TOKEN_KEY = 'spl_token';
+  // 登录/注册后回到来源页（仅允许站内相对路径，防开放重定向）
+  function nextUrl() {
+    try {
+      const n = new URLSearchParams(location.search).get('next');
+      if (n && n.charAt(0) === '/' && n.charAt(1) !== '/') return n;
+    } catch (e) { /* ignore */ }
+    return '/';
+  }
   let mode = 'login';
   let countdown = 0;
   let timer = null;
@@ -177,7 +185,7 @@
       const r = await api('/api/auth/login', { email, password });
       localStorage.setItem(TOKEN_KEY, r.token);
       setMsg('登录成功，正在返回…', 'ok');
-      setTimeout(() => { location.href = '/'; }, 600);
+      setTimeout(() => { location.href = nextUrl(); }, 600);
     } catch (e) {
       setMsg(e.message, 'err');
       $('loginBtn').disabled = false;
@@ -202,7 +210,7 @@
       });
       localStorage.setItem(TOKEN_KEY, r.token);
       setMsg('注册成功，正在返回…', 'ok');
-      setTimeout(() => { location.href = '/'; }, 700);
+      setTimeout(() => { location.href = nextUrl(); }, 700);
     } catch (e) {
       setMsg(e.message, 'err');
       $('registerBtn').disabled = false;
@@ -213,7 +221,7 @@
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
     fetch('/api/auth/me', { headers: { 'X-Auth-Token': token } })
-      .then((r) => { if (r.ok) location.href = '/'; })
+      .then((r) => { if (r.ok) location.href = nextUrl(); })
       .catch(() => {});
   }
 })();

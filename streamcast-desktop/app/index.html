@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>StreamCast</title>
+<style>
+  :root {
+    --bg:#0b0e14; --panel:#141a24; --line:#232c3b; --text:#e6edf6; --muted:#8b98ab;
+    --accent:#2f81f7; --ok:#2ea043; --err:#f85149;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f8fb; --panel:#fff; --line:#e3e8f0; --text:#101828; --muted:#667085; --accent:#2f6bf7; --ok:#15803d; --err:#d92d20; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; user-select: none;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    border-bottom: 1px solid var(--line); flex: none;
+  }
+  .logo { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; }
+  .logo i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .logo i.on { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+  .status { font-size: 12px; color: var(--muted); }
+  .spacer { flex: 1; }
+  .who { font-size: 12px; color: var(--muted); }
+  button.link { background: none; border: 0; color: var(--accent); font: inherit; font-size: 12.5px; cursor: pointer; padding: 4px 6px; }
+
+  main {
+    flex: 1; display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 14px;
+    padding: 14px 16px 16px; min-height: 0;
+  }
+  .stage {
+    position: relative; background: #05070c; border: 1px solid var(--line); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+    aspect-ratio: 16/9; align-self: start; width: 100%; max-height: 100%;
+  }
+  .stage video { width: 100%; height: 100%; object-fit: contain; display: none; }
+  .stage.live video { display: block; }
+  .ph { text-align: center; color: var(--muted); font-size: 13px; line-height: 2; }
+  .ph svg { width: 38px; height: 38px; opacity: .45; margin-bottom: 6px; }
+  .stage.live .ph { display: none; }
+  .badge {
+    position: absolute; top: 10px; left: 10px; display: none; align-items: center; gap: 6px;
+    background: rgba(20,26,36,.8); border: 1px solid var(--line); border-radius: 99px;
+    padding: 4px 10px; font-size: 11.5px; color: #e6edf6;
+  }
+  .stage.live .badge { display: flex; }
+  .badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--err); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .overlay-stats {
+    position: absolute; left: 10px; bottom: 10px; display: none; gap: 14px;
+    background: rgba(20,26,36,.8); border: 1px solid var(--line); border-radius: 9px;
+    padding: 6px 11px; font-size: 11.5px; color: #8b98ab;
+  }
+  .stage.live .overlay-stats { display: flex; }
+  .overlay-stats b { color: #e6edf6; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  aside { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .box h2 { font-size: 11.5px; color: var(--muted); font-weight: 600; letter-spacing: .8px; margin: 0 0 10px; }
+  .seg { display: flex; gap: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
+  .seg button {
+    flex: 1; border: 0; border-radius: 7px; padding: 7px 6px; font: inherit; font-size: 12.5px;
+    background: transparent; color: var(--muted); cursor: pointer;
+  }
+  .seg button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+  .field { margin-top: 10px; }
+  .field:first-of-type { margin-top: 0; }
+  .field label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; }
+  .field input, .field select {
+    width: 100%; font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--line); background: transparent; color: var(--text); outline: none;
+  }
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+  .field input[type=range] { padding: 0; accent-color: var(--accent); }
+  .row { display: flex; gap: 6px; }
+  .row > * { flex: 1; min-width: 0; }
+  .row .mini {
+    flex: 0 0 auto; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer;
+  }
+  .check { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+  .check input { accent-color: var(--accent); }
+  .go {
+    width: 100%; padding: 11px; border-radius: 9px; border: 1px solid var(--accent);
+    background: var(--accent); color: #fff; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+  }
+  .go:hover { background: #3d8bfd; }
+  .go.stop { background: transparent; border-color: var(--err); color: var(--err); }
+  .go.stop:hover { background: rgba(248,81,73,.1); }
+  .go[disabled] { opacity: .55; cursor: default; }
+  .tip { font-size: 11.5px; color: var(--muted); line-height: 1.65; margin-top: 9px; }
+  .tip.err { color: var(--err); }
+  .tip.ok { color: var(--ok); }
+  .adv { margin-top: 10px; }
+  .adv summary { font-size: 11.5px; color: var(--muted); cursor: pointer; }
+
+  /* 登录遮罩 */
+  .mask {
+    position: fixed; inset: 0; background: rgba(4,7,12,.7); backdrop-filter: blur(3px);
+    display: none; align-items: center; justify-content: center; z-index: 40;
+  }
+  .mask.on { display: flex; }
+  .modal { width: 320px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  .modal h3 { margin: 0 0 4px; font-size: 16px; }
+  .modal p { margin: 0 0 16px; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+  .modal .field { margin-top: 10px; }
+  .modal .go { margin-top: 16px; }
+  .modal .foot { margin-top: 12px; font-size: 11.5px; color: var(--muted); text-align: center; }
+  .modal .foot a { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><i id="dot"></i>StreamCast</div>
+  <span class="status" id="status">未开播</span>
+  <span class="spacer"></span>
+  <span class="who" id="who"></span>
+  <button class="link" id="authBtn">登录</button>
+</header>
+
+<main>
+  <div class="stage" id="stage">
+    <div class="ph">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="2.5" y="6" width="14" height="12" rx="2.5" />
+        <path d="M16.5 10.5l5-3v9l-5-3z" />
+      </svg>
+      <div id="phText">选择采集源后点击「开始直播」</div>
+    </div>
+    <video id="preview" playsinline muted autoplay></video>
+    <div class="badge"><i></i>直播中</div>
+    <div class="overlay-stats">
+      <span>观看 <b id="sViewers">0</b></span>
+      <span>帧率 <b id="sFps">0</b></span>
+      <span>码率 <b id="sKbps">0</b> kbps</span>
+    </div>
+  </div>
+
+  <aside>
+    <div class="box">
+      <h2>采集源</h2>
+      <div class="seg" id="srcSeg">
+        <button data-src="camera" class="on">摄像头</button>
+        <button data-src="screen">屏幕</button>
+      </div>
+
+      <div class="field" id="camField">
+        <label for="device">摄像头设备</label>
+        <select id="device"><option value="">默认摄像头</option></select>
+      </div>
+
+      <div class="field">
+        <label>画面与帧率</label>
+        <div class="row">
+          <select id="res">
+            <option value="640x480">640 × 480</option>
+            <option value="1280x720" selected>1280 × 720</option>
+            <option value="1920x1080">1920 × 1080</option>
+          </select>
+          <select id="fps">
+            <option value="10">10 fps</option>
+            <option value="15" selected>15 fps</option>
+            <option value="24">24 fps</option>
+            <option value="30">30 fps</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="quality">画质 <span id="qVal" style="color:var(--text)">65</span></label>
+        <input id="quality" type="range" min="35" max="88" step="1" value="65" />
+      </div>
+    </div>
+
+    <div class="box">
+      <h2>直播</h2>
+      <div class="field">
+        <label for="room">房间号</label>
+        <div class="row">
+          <input id="room" type="text" maxlength="12" inputmode="numeric" />
+          <button class="mini" id="rand">随机</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="nick">昵称（选填）</label>
+        <input id="nick" type="text" maxlength="20" placeholder="显示在观看端" />
+      </div>
+      <button class="go" id="toggle">开始直播</button>
+      <div class="tip" id="tip">开播需登录账号；观看端输入房间号即可收看。</div>
+
+      <details class="adv">
+        <summary>服务器地址</summary>
+        <div class="field">
+          <input id="server" type="text" spellcheck="false" />
+        </div>
+      </details>
+    </div>
+  </aside>
+</main>
+
+<div class="mask" id="mask">
+  <div class="modal">
+    <h3>登录后开播</h3>
+    <p>账号与网页端通用。没有账号？可在网页端注册后再回来登录。</p>
+    <div class="field">
+      <label for="email">邮箱</label>
+      <input id="email" type="text" spellcheck="false" placeholder="you@example.com" />
+    </div>
+    <div class="field">
+      <label for="password">密码</label>
+      <input id="password" type="password" placeholder="至少 8 位" />
+    </div>
+    <div class="tip err" id="loginTip"></div>
+    <button class="go" id="loginBtn">登录</button>
+    <div class="foot">在浏览器打开 <a href="https://spl.app.workbuddy.host" target="_blank">spl.app.workbuddy.host</a> 注册</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var TOKEN_KEY = 'spl_token';
+  var SERVER_KEY = 'spl_server';
+  var DEFAULT_SERVER = 'https://spl.app.workbuddy.host';
+
+  var source = 'camera';
+  var stream = null, ws = null, running = false, timer = null, statTimer = null;
+  var canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
+  var frames = 0, bytes = 0, fpsCount = 0, fpsTick = 0, busy = false, startedAt = 0;
+
+  function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
+  function server() { return (localStorage.getItem(SERVER_KEY) || DEFAULT_SERVER).replace(/\/+$/, ''); }
+  function wsUrl() { return server().replace(/^http/, 'ws') + '/ws'; }
+  function randRoom() { return String(Math.floor(1000 + Math.random() * 9000)); }
+  function setTip(t, k) { var el = $('tip'); el.className = 'tip' + (k ? ' ' + k : ''); el.textContent = t; }
+  function setStatus(t, live) { $('status').textContent = t; $('dot').className = live ? 'on' : ''; }
+
+  // ---------------- 初始化 ----------------
+  $('room').value = randRoom();
+  $('server').value = server();
+  $('quality').oninput = function () { $('qVal').textContent = this.value; };
+  $('rand').onclick = function () { $('room').value = randRoom(); };
+  $('server').onchange = function () {
+    var v = this.value.trim() || DEFAULT_SERVER;
+    localStorage.setItem(SERVER_KEY, v); this.value = v;
+  };
+
+  $('srcSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-src]');
+    if (!b || running) return;
+    source = b.getAttribute('data-src');
+    [].forEach.call(this.querySelectorAll('button'), function (x) {
+      x.classList.toggle('on', x === b);
+    });
+    $('camField').style.display = source === 'camera' ? '' : 'none';
+    $('phText').textContent = source === 'camera' ? '点击「开始直播」调用摄像头' : '点击「开始直播」共享主屏幕';
+  });
+
+  async function listDevices() {
+    try {
+      var list = await navigator.mediaDevices.enumerateDevices();
+      var cams = list.filter(function (d) { return d.kind === 'videoinput'; });
+      $('device').innerHTML = '<option value="">默认摄像头</option>' + cams.map(function (c, i) {
+        return '<option value="' + c.deviceId + '">' + (c.label || ('摄像头 ' + (i + 1))) + '</option>';
+      }).join('');
+    } catch (e) { /* ignore */ }
+  }
+  listDevices();
+
+  // ---------------- 登录 ----------------
+  function paintAuth() {
+    var t = token();
+    $('authBtn').textContent = t ? '退出' : '登录';
+    if (!t) { $('who').textContent = ''; return; }
+    fetch(server() + '/api/auth/me', { headers: { 'X-Auth-Token': t } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d && d.user) $('who').textContent = d.user.nickname || d.user.email;
+      }).catch(function () {});
+  }
+  paintAuth();
+
+  $('authBtn').onclick = function () {
+    if (token()) {
+      localStorage.removeItem(TOKEN_KEY);
+      paintAuth();
+      setTip('已退出登录');
+    } else {
+      $('mask').classList.add('on');
+    }
+  };
+
+  $('loginBtn').onclick = async function () {
+    var email = $('email').value.trim(), pw = $('password').value;
+    if (!email || !pw) { $('loginTip').textContent = '请填写邮箱与密码'; return; }
+    $('loginBtn').disabled = true;
+    $('loginTip').textContent = '登录中…';
+    try {
+      var r = await fetch(server() + '/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, password: pw }),
+      });
+      var d = await r.json();
+      if (!r.ok) throw new Error(d.error || '登录失败');
+      localStorage.setItem(TOKEN_KEY, d.token);
+      $('mask').classList.remove('on');
+      $('loginTip').textContent = '';
+      paintAuth();
+      setTip('已登录，可以开始直播了', 'ok');
+    } catch (e) {
+      $('loginTip').textContent = e.message || '登录失败';
+    } finally {
+      $('loginBtn').disabled = false;
+    }
+  };
+  $('password').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') $('loginBtn').click();
+  });
+
+  // ---------------- 采集 ----------------
+  function constraints() {
+    var res = $('res').value.split('x');
+    var fps = parseInt($('fps').value, 10) || 15;
+    var video = {
+      width: { ideal: parseInt(res[0], 10) },
+      height: { ideal: parseInt(res[1], 10) },
+      frameRate: { ideal: fps, max: fps },
+    };
+    if (source === 'screen') {
+      video.cursor = 'motion';
+    } else if ($('device').value) {
+      video.deviceId = { exact: $('device').value };
+    }
+    return { audio: false, video: video };
+  }
+
+  async function openSource() {
+    var c = constraints();
+    stream = source === 'screen'
+      ? await navigator.mediaDevices.getDisplayMedia(c)
+      : await navigator.mediaDevices.getUserMedia(c);
+    var v = $('preview');
+    v.srcObject = stream;
+    await v.play().catch(function () {});
+    canvas.width = v.videoWidth || 1280;
+    canvas.height = v.videoHeight || 720;
+    $('stage').classList.add('live');
+    // 用户从系统浮条点「停止共享」时同步收尾
+    stream.getVideoTracks().forEach(function (t) {
+      t.onended = function () { if (running) { setTip('采集已停止，直播结束', 'err'); stop('ended'); } };
+    });
+    if (source === 'camera') listDevices();
+  }
+
+  function closeSource() {
+    if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+    stream = null;
+    $('preview').srcObject = null;
+    $('stage').classList.remove('live');
+  }
+
+  // ---------------- 推流 ----------------
+  function connect(room) {
+    return new Promise(function (resolve, reject) {
+      ws = new WebSocket(wsUrl());
+      ws.binaryType = 'arraybuffer';
+      var settled = false;
+
+      ws.onopen = function () {
+        ws.send(JSON.stringify({
+          type: 'join', room: room, role: 'sender',
+          name: $('nick').value.trim() || '桌面主播',
+          title: $('nick').value.trim() || '',
+          token: token(),
+        }));
+      };
+      ws.onmessage = function (ev) {
+        if (typeof ev.data !== 'string') return;
+        var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+        if (m.type === 'joined') { settled = true; $('sViewers').textContent = m.receivers || 0; resolve(); }
+        else if (m.type === 'error') {
+          if (!settled) { settled = true; reject(new Error(m.message || '加入房间失败')); }
+          else setTip(m.message, 'err');
+        } else if (m.type === 'stats') {
+          $('sViewers').textContent = m.receivers || 0;
+        }
+      };
+      ws.onclose = function () {
+        if (!settled) { settled = true; reject(new Error('无法连接服务器，请检查网络或服务器地址')); return; }
+        if (running) { setTip('与服务器断开，直播已停止', 'err'); stop('disconnected'); }
+      };
+      ws.onerror = function () { /* onclose 统一处理 */ };
+    });
+  }
+
+  function sendMeta() {
+    if (!ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({
+      type: 'meta', width: canvas.width, height: canvas.height,
+      fps: parseInt($('fps').value, 10) || 15,
+      quality: parseInt($('quality').value, 10), codec: 'jpeg',
+    }));
+  }
+
+  function pump() {
+    if (!running || !ws || ws.readyState !== 1 || busy) return;
+    var v = $('preview');
+    if (!v.videoWidth) return;
+    if (canvas.width !== v.videoWidth || canvas.height !== v.videoHeight) {
+      canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+      sendMeta();
+    }
+    busy = true;
+    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(function (blob) {
+      busy = false;
+      if (!blob || !running || !ws || ws.readyState !== 1) return;
+      blob.arrayBuffer().then(function (buf) {
+        if (!running || !ws || ws.readyState !== 1) return;
+        ws.send(buf);
+        frames++; bytes += buf.byteLength; fpsCount++;
+      }).catch(function () {});
+    }, 'image/jpeg', parseInt($('quality').value, 10) / 100);
+  }
+
+  async function start() {
+    if (running) return;
+    if (!token()) { $('mask').classList.add('on'); return; }
+    var room = $('room').value.trim();
+    if (!/^\d{4,12}$/.test(room)) { setTip('房间号请使用 4-12 位数字', 'err'); return; }
+
+    $('toggle').disabled = true;
+    setTip(source === 'screen' ? '正在请求屏幕共享…' : '正在打开摄像头…');
+    try {
+      await openSource();
+    } catch (e) {
+      $('toggle').disabled = false;
+      var m = e && e.name === 'NotAllowedError' ? '权限被拒绝，请允许后重试' : (e.message || '采集失败');
+      setTip(m, 'err');
+      return;
+    }
+
+    setTip('正在连接服务器…');
+    try {
+      await connect(room);
+    } catch (e) {
+      closeSource(); $('toggle').disabled = false; setTip(e.message, 'err'); return;
+    }
+
+    running = true; startedAt = Date.now(); frames = 0; bytes = 0; fpsCount = 0; fpsTick = Date.now();
+    $('toggle').disabled = false;
+    $('toggle').textContent = '结束直播';
+    $('toggle').classList.add('stop');
+    $('room').disabled = true;
+    setStatus('直播中 · 房间 ' + room, true);
+    setTip('已开播，房间号 ' + room, 'ok');
+    sendMeta();
+
+    timer = setInterval(pump, Math.max(40, Math.round(1000 / (parseInt($('fps').value, 10) || 15))));
+    statTimer = setInterval(function () {
+      if (!running) return;
+      var now = Date.now(), dt = (now - fpsTick) / 1000;
+      if (dt < 1) return;
+      $('sFps').textContent = Math.round(fpsCount / dt);
+      $('sKbps').textContent = Math.round(bytes * 8 / dt / 1000);
+      fpsCount = 0; bytes = 0; fpsTick = now;
+      var sec = Math.floor((now - startedAt) / 1000);
+      var mm = String(Math.floor(sec / 60)).padStart(2, '0'), ss = String(sec % 60).padStart(2, '0');
+      setStatus('直播中 ' + mm + ':' + ss + ' · 房间 ' + room, true);
+    }, 1000);
+  }
+
+  function stop(reason) {
+    if (!running && !ws && !stream) return;
+    running = false;
+    if (timer) { clearInterval(timer); timer = null; }
+    if (statTimer) { clearInterval(statTimer); statTimer = null; }
+    if (ws && ws.readyState === 1) { try { ws.close(); } catch (e) { /* ignore */ } }
+    ws = null;
+    closeSource();
+    $('toggle').textContent = '开始直播';
+    $('toggle').classList.remove('stop');
+    $('toggle').disabled = false;
+    $('room').disabled = false;
+    $('sFps').textContent = '0'; $('sKbps').textContent = '0'; $('sViewers').textContent = '0';
+    setStatus(reason === 'disconnected' ? '连接已断开' : '未开播', false);
+    if (reason !== 'disconnected') setTip('直播已结束');
+  }
+
+  $('toggle').onclick = function () { running ? stop() : start(); };
+
+  window.addEventListener('beforeunload', function () {
+    if (ws && ws.readyState === 1) { try { ws.close(); } catch (e) {} }
+    if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') $('mask').classList.remove('on');
+  });
+})();
+</script>
+</body>
+</html>

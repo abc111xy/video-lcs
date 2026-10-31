@@ -1,0 +1,53 @@
+{
+  "name": "streamcast-desktop",
+  "productName": "StreamCast",
+  "version": "1.0.0",
+  "description": "流式频传输 · 桌面开播端（摄像头 / 屏幕）",
+  "main": "main.js",
+  "author": "StreamCast",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win zip --linux AppImage tar.gz"
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "host.workbuddy.streamcast",
+    "productName": "StreamCast",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "executableName": "streamcast",
+      "category": "AudioVideo",
+      "icon": "build/icon.png"
+    },
+    "compression": "normal"
+  }
+}

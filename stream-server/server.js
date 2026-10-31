@@ -22,6 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const { WebSocketServer, WebSocket } = require('ws');
 const auth = require('./lib/auth');
+const download = require('./lib/download');
 const mailer = require('./lib/mailer');
 const { initSchema, query } = require('./lib/db');
 
@@ -404,6 +405,39 @@ async function handleAuth(p, req, res) {
   }
 }
 
+/** 下载票据校验失败时的提示页（不暴露具体文件路径） */
+function sendDownloadError(res, reason) {
+  const map = {
+    expired: ['下载链接已过期', '链接有效期 10 分钟，请回到下载页重新获取。'],
+    exhausted: ['下载链接已失效', '该链接的使用次数已达上限，请回到下载页重新获取。'],
+    invalid: ['下载链接无效', '链接可能被截断或已损坏，请回到下载页重新获取。'],
+    missing: ['安装包暂未发布', '该平台的版本还在打包中，请稍后再来看看。'],
+  };
+  const [title, desc] = map[reason] || map.invalid;
+  const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f6f8fb;color:#101828;
+       font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;padding:24px}
+  .c{max-width:420px;text-align:center;background:#fff;border:1px solid #e3e8f0;border-radius:16px;padding:36px 26px;
+     box-shadow:0 18px 40px rgba(16,24,40,.07)}
+  h1{font-size:20px;margin:0 0 10px}p{color:#667085;font-size:14px;line-height:1.8;margin:0 0 22px}
+  a{display:inline-block;background:#2f6bf7;color:#fff;text-decoration:none;font-weight:600;font-size:14px;
+    padding:11px 20px;border-radius:9px}
+  @media (prefers-color-scheme:dark){
+    body{background:#0b0e14;color:#e6edf6}.c{background:#141a24;border-color:#232c3b}
+    p{color:#8b98ab}a{background:#2f81f7}
+  }
+</style>
+<div class="c"><h1>${title}</h1><p>${desc}</p><a href="/">返回下载页</a></div></html>`;
+  res.writeHead(403, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(html);
+}
+
 // ---------------------------------------------------------------- 维护模式
 // 存在该文件即视为维护中（运行期实时判断，删除文件后下个请求即恢复，无需重启）
 const MAINT_FLAG = path.join(__dirname, '.maintenance');
@@ -430,12 +464,11 @@ function sendMaintenance(req, res, p) {
 }
 
 // ---------------------------------------------------------------- HTTP
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const p = url.pathname;
 
-  if (maintenanceOn()) {
-    // 探活仍需可用，否则平台会判定进程已死
+  if (maintenanceOn()) {    // 探活仍需可用，否则平台会判定进程已死
     if (p === '/health' || p === '/api/health') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ ok: true, maintenance: true, service: 'stream-relay-server', uptime: process.uptime() }));
@@ -448,6 +481,18 @@ const server = http.createServer((req, res) => {
   if (p === '/health' || p === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, service: 'stream-relay-server', rooms: rooms.size, uptime: process.uptime() }));
+    return;
+  }
+
+  // 桌面端（file:// 页面）需要跨域调用账号接口；
+  // 接口本身靠令牌鉴权、不使用 Cookie，因此放开来源是安全的。
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Auth-Token, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS' && p.startsWith('/api/')) {
+    res.writeHead(204);
+    res.end();
     return;
   }
 
@@ -471,9 +516,69 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ---------------------------------------------------------------- 下载票据
+  if (p === '/api/download/ticket' && req.method === 'POST') {
+    const ip = clientIp(req);
+    const gate = download.allowIssue(ip);
+    if (!gate.ok) {
+      res.setHeader('Retry-After', String(gate.retryAfter));
+      return json(res, 429, { error: '请求过于频繁，请稍后再试', retryAfter: gate.retryAfter });
+    }
+    let body;
+    try { body = await readJson(req); } catch (e) { return json(res, 400, { error: '请求格式不正确' }); }
+    const platform = String(body.platform || '');
+    if (!download.PLATFORMS[platform]) return json(res, 400, { error: '未知的下载平台' });
+    const st = download.statFile(platform);
+    if (!st) return json(res, 404, { error: '该平台的安装包尚未发布' });
+
+    const { token, exp, meta } = download.buildToken(platform, download.TTL_MS);
+    console.log(`[download] 签发 ${platform} ip=${ip} exp=${new Date(exp).toISOString()}`);
+    return json(res, 200, {
+      url: `/dl/${platform}?t=${encodeURIComponent(token)}`,
+      file: meta.name,
+      version: meta.version,
+      size: st.size,
+      expiresAt: exp,
+      expiresIn: Math.round((exp - Date.now()) / 1000),
+    });
+  }
+
+  if (p.startsWith('/dl/') && (req.method === 'GET' || req.method === 'HEAD')) {
+    const platform = p.slice(4);
+    const token = url.searchParams.get('t') || '';
+    const r = download.checkToken(token, platform);
+    if (!r.ok) {
+      return sendDownloadError(res, r.reason || 'invalid');
+    }
+    const fp = download.filePath(platform);
+    let st;
+    try { st = fs.statSync(fp); } catch (e) {
+      return sendDownloadError(res, 'missing');
+    }
+    const ext = path.extname(fp).toLowerCase();
+    const headers = {
+      'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
+      'Content-Length': st.size,
+      'Content-Disposition': `attachment; filename="${r.meta.name}"`,
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'X-Content-Type-Options': 'nosniff',
+    };
+    res.writeHead(200, headers);
+    if (req.method === 'HEAD') return res.end();
+    fs.createReadStream(fp).pipe(res);
+    return;
+  }
+
   // ---------------------------------------------------------------- 账号
   if (p.startsWith('/api/auth/')) {
     handleAuth(p, req, res);
+    return;
+  }
+
+  // 发布包不放在 public 下，此处再兜一层，防止静态路径被拼出来
+  if (p.startsWith('/download/') || p.startsWith('/data/')) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('404 Not Found');
     return;
   }
 
